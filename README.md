@@ -1,0 +1,2 @@
+# Kinoizlabot
+Kinoni izla bot
