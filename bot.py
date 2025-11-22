@@ -1,6 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import sqlite3
+import os
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = 1373647
@@ -95,6 +96,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
+            cursor.execute("SELECT extra_text FROM films WHERE code=?", (code,))
+            extra_text = cursor.fetchone()[0]
             caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}" if extra_text else f"Kod: {code}\n{BOT_USERNAME}"
             keyboard = [
                 [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{code}"),
@@ -185,6 +188,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "delete_extra":
+        context.user_data["action"] = "delete_extra"
         cursor.execute("UPDATE films SET extra_text=''")
         conn.commit()
         await query.message.reply_text("Qo‘shimcha matn barcha videolardan o‘chirildi!")
@@ -324,7 +328,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}" if extra_text else f"Kod: {text}\n{BOT_USERNAME}"
             keyboard = [
                 [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
-                 InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")]
+                 InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")] 
             ] if user_id == OWNER_ID else None
             await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None, caption=caption_text)
     else:
@@ -336,4 +340,14 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(filters.VIDEO | filters.PHOTO, handle_owner_video))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-app.run_polling()
+
+# ---------- RUN WITH WEBHOOK ----------
+PORT = int(os.environ.get("PORT", 8443))
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Heroku dagi URL: https://your-app.herokuapp.com
+
+app.run_webhook(
+    listen="0.0.0.0",
+    port=PORT,
+    url_path=BOT_TOKEN,
+    webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
+)
