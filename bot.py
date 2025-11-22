@@ -238,8 +238,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_id, extra_text = result
                 caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
                 keyboard = [
-                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
-                     InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}')]
+                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}")],
+                    [InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}')]
                 ]
                 await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=caption_text)
             else:
