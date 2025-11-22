@@ -1,7 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import sqlite3
-import os
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = 1373647
@@ -16,10 +15,16 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS films (
     code TEXT PRIMARY KEY,
-    file_id TEXT NOT NULL,
-    extra_text TEXT DEFAULT ''
+    file_id TEXT NOT NULL
 )
 """)
+# extra_text ustuni mavjud bo'lmasa qo'shish
+try:
+    cursor.execute("ALTER TABLE films ADD COLUMN extra_text TEXT DEFAULT ''")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass  # ustun allaqachon mavjud bo'lsa xato bermaydi
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY
@@ -39,6 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     if user_id == OWNER_ID:
+        # Foydalanuvchilar sonini olish
         cursor.execute("SELECT COUNT(*) FROM users")
         user_count = cursor.fetchone()[0]
 
@@ -49,11 +55,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("➕ Kanal qo‘shish", callback_data="add_channel")],
             [InlineKeyboardButton("🗑 Kanalni o‘chirish", callback_data="delete_channel")],
             [InlineKeyboardButton("📋 Kanallar ro‘yxati", callback_data="list_channels")],
-            [InlineKeyboardButton("📝 Qo‘shimcha matn", callback_data="manage_text")],
-            [InlineKeyboardButton(f"👥 Foydalanuvchilar soni ({user_count})", callback_data="user_count")]
+            [InlineKeyboardButton("📝 Qo‘shimcha matn", callback_data="manage_text")]
         ]
         await update.message.reply_text(
-            f"Salom Owner! Tanlang:", 
+            f"Salom Owner! Tanlang:\n👥 Botda foydalanuvchilar soni: {user_count}", 
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
@@ -76,6 +81,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         file_id, extra_text = result
 
+        # Kanallarga obuna tekshirish
         cursor.execute("SELECT channel FROM channels")
         channels = cursor.fetchall()
         not_subscribed = []
@@ -96,9 +102,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            cursor.execute("SELECT extra_text FROM films WHERE code=?", (code,))
-            extra_text = cursor.fetchone()[0]
-            caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}" if extra_text else f"Kod: {code}\n{BOT_USERNAME}"
+            caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
             keyboard = [
                 [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{code}"),
                  InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{code}")]
@@ -111,7 +115,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "upload_video":
-        await query.message.reply_text("Video yuboring. Har safar video kelganda kodi so‘raladi.")
+        context.user_data["action"] = "upload_video"
+        await query.message.reply_text("Video yuboring va keyin kodi yozing:")
         return
 
     elif data == "search_video":
@@ -121,21 +126,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "broadcast":
         context.user_data["action"] = "broadcast"
-        keyboard = [
-            [InlineKeyboardButton("📝 Matn yuborish", callback_data="broadcast_text")],
-            [InlineKeyboardButton("🖼 Rasm yuborish", callback_data="broadcast_photo")],
-            [InlineKeyboardButton("🎥 Video yuborish", callback_data="broadcast_video")]
-        ]
-        await query.message.reply_text("Broadcast turi tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    elif data.startswith("broadcast_"):
-        type_ = data.split("_")[1]
-        context.user_data["broadcast_type"] = type_
-        if type_ == "text":
-            await query.message.reply_text("Broadcast matnini yozing:")
-        else:
-            await query.message.reply_text(f"Broadcast {type_} yuboring va caption yozing:")
+        await query.message.reply_text("Broadcast uchun matnni yozing:")
         return
 
     elif data == "add_channel":
@@ -158,6 +149,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(text)
         return
 
+    # ---------- INLINE QO‘SHIMCHA MATN TUGMALARI ----------
     elif data == "manage_text":
         keyboard = [
             [InlineKeyboardButton("➕ Qo‘shish", callback_data="add_extra")],
@@ -189,8 +181,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "delete_extra":
         context.user_data["action"] = "delete_extra"
-        cursor.execute("UPDATE films SET extra_text=''")
-        conn.commit()
         await query.message.reply_text("Qo‘shimcha matn barcha videolardan o‘chirildi!")
         return
 
@@ -208,26 +198,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"Video {code} o‘chirildi!")
         return
 
-    elif data == "user_count":
-        cursor.execute("SELECT COUNT(*) FROM users")
-        count = cursor.fetchone()[0]
-        await query.message.reply_text(f"Hozirgi foydalanuvchilar soni: {count}")
-        return
-
 # ---------- OWNER VIDEO HANDLER ----------
 async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != OWNER_ID:
         return
-    if not update.message.video and not update.message.photo:
+    if not update.message.video:
         return
-    
-    if update.message.video:
-        context.user_data["video_file_id"] = update.message.video.file_id
-    elif update.message.photo:
-        context.user_data["video_file_id"] = update.message.photo[-1].file_id
-    
+    context.user_data["video_file_id"] = update.message.video.file_id
     context.user_data["action"] = "set_code"
-    await update.message.reply_text("Video qabul qilindi. Endi video kodi yozing:")
+    await update.message.reply_text("Endi video uchun kodi yozing:")
 
 # ---------- TEXT HANDLER ----------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -235,71 +214,122 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     action = context.user_data.get("action")
 
-    # ---------- OWNER UPDATE CODE ----------
-    if user_id == OWNER_ID and action == "update_code":
-        old_code = context.user_data.get("old_code")
-        if not old_code:
-            await update.message.reply_text("Eski kod topilmadi!")
+    # ---------- OWNER ACTIONS ----------
+    if user_id == OWNER_ID:
+        # Video kodi qo‘shish
+        if action == "set_code":
+            file_id = context.user_data.get("video_file_id")
+            # Kod allaqachon mavjudligini tekshirish
+            cursor.execute("SELECT file_id, extra_text FROM films WHERE code=?", (text,))
+            result = cursor.fetchone()
+            if result:
+                # Kod band ekanini aytish, eski qo‘shimcha matnni saqlash
+                _, extra_text = result
+                await update.message.reply_text(f"Kechirasiz, kod '{text}' band! Avvalgi qo‘shimcha matn: {extra_text}")
+                return
+            # Kod mavjud emas, yangi video saqlash
+            cursor.execute("INSERT INTO films (code, file_id) VALUES (?, ?)", (text, file_id))
+            conn.commit()
+            keyboard = [
+                [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
+                 InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")]
+            ]
+            # Qo‘shimcha matn mavjud bo‘lsa qo‘shib yuborish
+            cursor.execute("SELECT extra_text FROM films WHERE code=?", (text,))
+            extra_text = cursor.fetchone()[0] if cursor.fetchone() else ""
+            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+            await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=caption_text)
+            await update.message.reply_text(f"Video saqlandi! Kod: {text}")
             context.user_data.clear()
             return
 
-        cursor.execute("SELECT code FROM films WHERE code=?", (text,))
-        if cursor.fetchone():
-            await update.message.reply_text("Bu kod band! Iltimos, boshqa kod kiriting.")
-            return
-
-        cursor.execute("UPDATE films SET code=? WHERE code=?", (text, old_code))
-        conn.commit()
-        await update.message.reply_text(f"Video kodi muvaffaqiyatli yangilandi!\nEski kod: {old_code} → Yangi kod: {text}")
-        context.user_data.clear()
-        return
-
-    # ---------- OWNER VIDEO KODI QO‘SHISH ----------
-    if user_id == OWNER_ID and action == "set_code":
-        file_id = context.user_data.get("video_file_id")
-        cursor.execute("SELECT code FROM films WHERE code=?", (text,))
-        if cursor.fetchone():
-            await update.message.reply_text("Bu kod band! Iltimos, boshqa kod kiriting.")
-            return
-        cursor.execute("INSERT INTO films (code, file_id) VALUES (?, ?)", (text, file_id))
-        conn.commit()
-        keyboard = [
-            [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
-             InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")]
-        ]
-        await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=f"Kod: {text}\n{BOT_USERNAME}")
-        await update.message.reply_text(f"Video saqlandi! Kod: {text}")
-        context.user_data.pop("video_file_id", None)
-        context.user_data.pop("action", None)
-        return
-
-    # ---------- OWNER BROADCAST ----------
-    if user_id == OWNER_ID and action in ["broadcast", "broadcast_caption"]:
-        b_type = context.user_data.get("broadcast_type", "text")
-        file_id = context.user_data.get("broadcast_file_id")
-
-        if action == "broadcast_caption":
-            caption = text
+        # Video kodi qidirish
+        if action == "search_video":
+            cursor.execute("SELECT file_id, extra_text FROM films WHERE code=?", (text,))
+            result = cursor.fetchone()
+            if result:
+                file_id, extra_text = result
+                caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+                keyboard = [
+                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
+                     InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")]
+                ]
+                await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=caption_text)
+            else:
+                await update.message.reply_text("Bunday kodga film topilmadi!")
             context.user_data.clear()
-        else:
-            caption = text
+            return
 
-        cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
-        count = 0
-        for u in users:
-            try:
-                if b_type == "photo":
-                    await context.bot.send_photo(u[0], photo=file_id, caption=caption)
-                elif b_type == "video":
-                    await context.bot.send_video(u[0], video=file_id, caption=caption)
-                else:
-                    await context.bot.send_message(u[0], text)
-                count += 1
-            except:
-                pass
-        await update.message.reply_text(f"Xabar {count} foydalanuvchiga yuborildi!")
-        return
+        # Kanal qo‘shish
+        if action == "add_channel":
+            cursor.execute("INSERT OR IGNORE INTO channels (channel) VALUES (?)", (text,))
+            conn.commit()
+            await update.message.reply_text(f"Kanal qo‘shildi: {text}")
+            context.user_data.clear()
+            return
+
+        # Kanal o‘chirish
+        if action == "delete_channel":
+            cursor.execute("DELETE FROM channels WHERE channel=?", (text,))
+            conn.commit()
+            await update.message.reply_text(f"Kanal o‘chirildi: {text}")
+            context.user_data.clear()
+            return
+
+        # Broadcast (video yoki rasm bilan)
+        if action == "broadcast":
+            cursor.execute("SELECT user_id FROM users")
+            users = cursor.fetchall()
+            count = 0
+            media_file_id = context.user_data.get("media_file_id")  # video yoki rasm file_id
+            broadcast_caption = text  # broadcast caption
+            for u in users:
+                try:
+                    if media_file_id:
+                        await context.bot.send_video(u[0], media_file_id, caption=broadcast_caption)
+                    else:
+                        await context.bot.send_message(u[0], broadcast_caption)
+                    count += 1
+                except:
+                    pass
+            await update.message.reply_text(f"Xabar {count} foydalanuvchiga yuborildi!")
+            context.user_data.clear()
+            return
+
+        # Qo‘shimcha matn barcha videolarga qo‘shish
+        if action == "add_extra":
+            cursor.execute("UPDATE films SET extra_text=?", (text,))
+            conn.commit()
+            await update.message.reply_text("Qo‘shimcha matn barcha videolarga qo‘shildi!")
+            context.user_data.clear()
+            return
+
+        # Qo‘shimcha matn barcha videolardan o‘chirish
+        if action == "delete_extra":
+            cursor.execute("UPDATE films SET extra_text=''")
+            conn.commit()
+            await update.message.reply_text("Qo‘shimcha matn barcha videolardan o‘chirildi!")
+            context.user_data.clear()
+            return
+
+        # Owner kodi alishtirish
+        if action == "update_code":
+            new_code = text
+            old_code = context.user_data.get("old_code")
+            cursor.execute("UPDATE films SET code=? WHERE code=?", (new_code, old_code))
+            conn.commit()
+            cursor.execute("SELECT file_id, extra_text FROM films WHERE code=?", (new_code,))
+            result = cursor.fetchone()
+            if result:
+                file_id, extra_text = result
+                keyboard = [
+                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{new_code}"),
+                     InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{new_code}")]
+                ]
+                await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=f"Kod: {new_code}\n{extra_text}\n{BOT_USERNAME}")
+            await update.message.reply_text(f"Video kodi yangilandi! Yangi kod: {new_code}")
+            context.user_data.clear()
+            return
 
     # ---------- FOYDALANUVCHI KINO KO‘RISH ----------
     cursor.execute("SELECT file_id, extra_text FROM films WHERE code=?", (text,))
@@ -325,10 +355,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}" if extra_text else f"Kod: {text}\n{BOT_USERNAME}"
+            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
             keyboard = [
                 [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
-                 InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")] 
+                 InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")]
             ] if user_id == OWNER_ID else None
             await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None, caption=caption_text)
     else:
@@ -338,16 +368,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(callback_handler))
-app.add_handler(MessageHandler(filters.VIDEO | filters.PHOTO, handle_owner_video))
+app.add_handler(MessageHandler(filters.VIDEO, handle_owner_video))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-# ---------- RUN WITH WEBHOOK ----------
-PORT = int(os.environ.get("PORT", 8443))
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Heroku dagi URL: https://your-app.herokuapp.com
-
-app.run_webhook(
-    listen="0.0.0.0",
-    port=PORT,
-    url_path=BOT_TOKEN,
-    webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}"
-)
+app.run_polling()
