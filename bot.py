@@ -52,6 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🗑 Kanalni o‘chirish", callback_data="delete_channel")],
             [InlineKeyboardButton("📋 Kanallar ro‘yxati", callback_data="list_channels")],
             [InlineKeyboardButton("📝 Qo‘shimcha matn", callback_data="manage_text")]
+            [InlineKeyboardButton("👥 A'zolar soni", callback_data="users_count")],
         ]
         await update.message.reply_text("Salom Owner! Tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -190,7 +191,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         await query.message.reply_text(f"Video {code} o‘chirildi!")
         return
-
+elif data == "users_count":
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+    await query.message.reply_text(f"Botdagi foydalanuvchilar soni: {count} ta")
+    return
 # ---------- OWNER VIDEO HANDLER ----------
 async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != OWNER_ID:
@@ -256,20 +261,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             return
 
-        # Broadcast
-        if action == "broadcast":
-            cursor.execute("SELECT user_id FROM users")
-            users = cursor.fetchall()
-            count = 0
-            for u in users:
-                try:
-                    await context.bot.send_message(u[0], text)
-                    count += 1
-                except:
-                    pass
-            await update.message.reply_text(f"Xabar {count} foydalanuvchiga yuborildi!")
-            context.user_data.clear()
-            return
+        # Broadcast (media + caption)
+    if action == "broadcast_send":
+        msg = context.user_data.get("broadcast_media")
+        text_msg = text
+
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
+
+        count = 0
+        for u in users:
+            try:
+                if msg.photo:
+                    await context.bot.send_photo(u[0], msg.photo[-1].file_id, caption=text_msg)
+                elif msg.video:
+                    await context.bot.send_video(u[0], msg.video.file_id, caption=text_msg)
+                elif msg.document:
+                    await context.bot.send_document(u[0], msg.document.file_id, caption=text_msg)
+                else:
+                    await context.bot.send_message(u[0], text_msg)
+                count += 1
+            except:
+                pass
+
+        await update.message.reply_text(f"Broadcast {count} foydalanuvchiga yuborildi!")
+        context.user_data.clear()
+        return
 
         # Qo‘shimcha matn barcha videolarga qo‘shish
         if action == "add_extra":
