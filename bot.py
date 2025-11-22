@@ -95,7 +95,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
+            caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}" if extra_text else f"Kod: {code}\n{BOT_USERNAME}"
             keyboard = [
                 [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{code}"),
                  InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{code}")]
@@ -185,7 +185,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "delete_extra":
-        context.user_data["action"] = "delete_extra"
+        cursor.execute("UPDATE films SET extra_text=''")
+        conn.commit()
         await query.message.reply_text("Qo‘shimcha matn barcha videolardan o‘chirildi!")
         return
 
@@ -320,7 +321,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}" if extra_text else f"Kod: {text}\n{BOT_USERNAME}"
             keyboard = [
                 [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
                  InlineKeyboardButton("❌ Videoni o‘chirish", callback_data=f"delete_{text}")]
