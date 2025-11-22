@@ -209,21 +209,27 @@ async def handle_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get("action")
     if action != "broadcast":
         return
+
     text = update.message.caption if update.message.caption else update.message.text
     cursor.execute("SELECT user_id FROM users")
     users = cursor.fetchall()
     count = 0
+
     for u in users:
         try:
             if update.message.video:
-                await context.bot.send_video(u[0], update.message.video.file_id, caption=text)
+                await context.bot.send_video(chat_id=u[0], video=update.message.video.file_id, caption=text)
             elif update.message.photo:
-                await context.bot.send_photo(u[0], update.message.photo[-1].file_id, caption=text)
-            else:
-                await context.bot.send_message(u[0], text)
+                # Rasm yuborishda caption uzunligi 1024 belgidan oshmasligi kerak
+                cap = text if text else None
+                await context.bot.send_photo(chat_id=u[0], photo=update.message.photo[-1].file_id, caption=cap)
+            elif update.message.text:
+                await context.bot.send_message(chat_id=u[0], text=text)
             count += 1
-        except:
-            pass
+        except Exception as e:
+            print(f"Xato {u[0]}: {e}")  # Loglash uchun
+            continue
+
     await update.message.reply_text(f"Xabar {count} foydalanuvchiga yuborildi!")
     context.user_data.clear()
 
