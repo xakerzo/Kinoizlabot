@@ -143,13 +143,11 @@ conn.commit()
 def execute_query(query, params=None):
     """Barcha SQL so'rovlarni bajarish"""
     if DATABASE_URL:
-        # PostgreSQL uchun
         if params:
             cursor.execute(query, params)
         else:
             cursor.execute(query)
     else:
-        # SQLite uchun
         if params:
             cursor.execute(query, params)
         else:
@@ -180,6 +178,23 @@ def fetch_all(query, params=None):
         cursor.execute(query)
     return cursor.fetchall()
 
+def is_premium_user(user_id):
+    """Premium foydalanuvchini tekshirish"""
+    result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
+    
+    if not result:
+        return False
+    
+    expiry_date = result[0]
+    
+    # PostgreSQL dan datetime obyekt qaytadi, SQLite dan string
+    if isinstance(expiry_date, datetime):
+        # PostgreSQL - to'g'ridan-to'g'ri datetime
+        return expiry_date > datetime.now()
+    else:
+        # SQLite - string, convert qilish kerak
+        return datetime.fromisoformat(expiry_date) > datetime.now()
+
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -189,9 +204,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
 
-    # Premium tekshirish
-    result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
-    is_premium = result and datetime.fromisoformat(result[0]) > datetime.now()
+    # Premium tekshirish - YANGI FUNKSIYA
+    is_premium = is_premium_user(user_id)
 
     # Hamkorlar matnini olish
     partners_texts = fetch_all("SELECT text FROM partners ORDER BY id")
@@ -267,9 +281,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("check_subs_"):
         code = data.split("_")[-1]
         
-        # Premium tekshirish
-        premium_result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
-        is_premium = premium_result and datetime.fromisoformat(premium_result[0]) > datetime.now()
+        # Premium tekshirish - YANGI FUNKSIYA
+        is_premium = is_premium_user(user_id)
         
         if is_premium:
             result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (code,))
@@ -544,9 +557,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🎫 Premium foydalanuvchilar:\n\n"
         for i, user in enumerate(premium_users, 1):
             user_id, expiry_date = user
-            expiry = datetime.fromisoformat(expiry_date)
-            days_left = (expiry - datetime.now()).days
-            text += f"{i}. User ID: {user_id}\nMuddati: {expiry_date}\nQolgan kun: {days_left}\n\n"
+            # PostgreSQL dan datetime obyekt qaytadi
+            if isinstance(expiry_date, datetime):
+                days_left = (expiry_date - datetime.now()).days
+                expiry_str = expiry_date.strftime('%Y-%m-%d %H:%M')
+            else:
+                # SQLite uchun
+                expiry_dt = datetime.fromisoformat(expiry_date)
+                days_left = (expiry_dt - datetime.now()).days
+                expiry_str = expiry_date
+            
+            text += f"{i}. User ID: {user_id}\nMuddati: {expiry_str}\nQolgan kun: {days_left}\n\n"
         
         await query.message.reply_text(text)
         return
@@ -863,7 +884,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             expiry_date = EXCLUDED.expiry_date,
                             approved_by = EXCLUDED.approved_by,
                             approved_date = EXCLUDED.approved_date
-                        """, (target_user_id, expiry_date.isoformat(), OWNER_ID, datetime.now().isoformat()))
+                        """, (target_user_id, expiry_date, OWNER_ID, datetime.now()))
                     else:
                         execute_query("""
                             INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
@@ -922,7 +943,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             expiry_date = EXCLUDED.expiry_date,
                             approved_by = EXCLUDED.approved_by,
                             approved_date = EXCLUDED.approved_date
-                        """, (target_user_id, expiry_date.isoformat(), OWNER_ID, datetime.now().isoformat()))
+                        """, (target_user_id, expiry_date, OWNER_ID, datetime.now()))
                     else:
                         execute_query("""
                             INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
@@ -956,8 +977,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result:
         file_id, extra_text = result
         
-        premium_result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
-        is_premium = premium_result and datetime.fromisoformat(premium_result[0]) > datetime.now()
+        # Premium tekshirish - YANGI FUNKSIYA
+        is_premium = is_premium_user(user_id)
         
         if is_premium:
             caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
@@ -1012,7 +1033,7 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 expiry_date = EXCLUDED.expiry_date,
                 approved_by = EXCLUDED.approved_by,
                 approved_date = EXCLUDED.approved_date
-            """, (user_id, expiry_date.isoformat(), OWNER_ID, datetime.now().isoformat()))
+            """, (user_id, expiry_date, OWNER_ID, datetime.now()))
         else:
             execute_query("""
                 INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
