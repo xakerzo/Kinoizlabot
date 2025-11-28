@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = 1373647
-BOT_TOKEN = os.environ.get('8332135205:AAF2RbOWLE9elxsmFT9fh12IqYnjqPwwHrg')
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 BOT_USERNAME = "@kinoni_izlabot"
 
 # ---------- DATABASE ----------
