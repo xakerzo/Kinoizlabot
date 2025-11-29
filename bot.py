@@ -288,6 +288,82 @@ def get_original_code_from_callback(short_code):
             return original_code
     return short_code  # Topilmasa, short_code ni qaytarish
 
+# ---------- YANGI FUNKSIYALAR: TUGMA VA XABARLARNI YUBORISH ----------
+async def send_video_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Video tugmalarini yuborish"""
+    try:
+        button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
+        
+        if button_result:
+            button_text, button_url = button_result
+            keyboard = [
+                [InlineKeyboardButton(button_text, url=button_url)],
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await update.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Agar tugma bo'lmasa, faqat ulashish tugmasini chiqaramiz
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await update.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    except Exception as e:
+        print(f"Tugma yuborishda xatolik: {e}")
+
+async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Video xabarini yuborish"""
+    try:
+        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        
+        if caption_result:
+            await update.message.reply_text(caption_result[0])
+    except Exception as e:
+        print(f"Xabar yuborishda xatolik: {e}")
+
+# ---------- CALLBACK UCHUN YANGI FUNKSIYALAR ----------
+async def send_callback_buttons(query, context: ContextTypes.DEFAULT_TYPE):
+    """Callback uchun video tugmalarini yuborish"""
+    try:
+        button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
+        
+        if button_result:
+            button_text, button_url = button_result
+            keyboard = [
+                [InlineKeyboardButton(button_text, url=button_url)],
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await query.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Agar tugma bo'lmasa, faqat ulashish tugmasini chiqaramiz
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await query.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    except Exception as e:
+        print(f"Callback tugma yuborishda xatolik: {e}")
+
+async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE):
+    """Callback uchun video xabarini yuborish"""
+    try:
+        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        
+        if caption_result:
+            await query.message.reply_text(caption_result[0])
+    except Exception as e:
+        print(f"Callback xabar yuborishda xatolik: {e}")
+
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -402,23 +478,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
                 await query.message.reply_video(file_id, caption=caption_text)
                 
-                # YANGI TARTIB: Avval TUGMALAR
-                button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-                if button_result:
-                    button_text, button_url = button_result
-                    keyboard = [
-                        [InlineKeyboardButton(button_text, url=button_url)],
-                        [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                    ]
-                    await query.message.reply_text(
-                        "Quyidagi tugmalardan foydalaning:",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
+                # ✅ HAR DOIM TUGMALAR CHIQSIN
+                await send_callback_buttons(query, context)
                 
-                # KEYIN XABAR
-                caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-                if caption_result:
-                    await query.message.reply_text(caption_result[0])
+                # ✅ HAR DOIM XABAR CHIQSIN
+                await send_callback_caption(query, context)
             return
 
         # Oddiy foydalanuvchi uchun obuna tekshirish
@@ -467,23 +531,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
             await query.message.reply_video(file_id, caption=caption_text)
             
-            # YANGI TARTIB: Avval TUGMALAR
-            button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-            if button_result:
-                button_text, button_url = button_result
-                keyboard = [
-                    [InlineKeyboardButton(button_text, url=button_url)],
-                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                ]
-                await query.message.reply_text(
-                    "Quyidagi tugmalardan foydalaning:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+            # ✅ HAR DOIM TUGMALAR CHIQSIN
+            await send_callback_buttons(query, context)
             
-            # KEYIN XABAR
-            caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-            if caption_result:
-                await query.message.reply_text(caption_result[0])
+            # ✅ HAR DOIM XABAR CHIQSIN
+            await send_callback_caption(query, context)
         return
 
     # ---------- OWNER TUGMALARI ----------
@@ -947,7 +999,52 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- DO'STLARGA YUBORISH TUGMASI ----------
     elif data == "share_friend":
-        await query.message.reply_text("🚀 Tez orada ishga tushadi!")
+        # Userning oxirgi ko'rgan video kodini olish
+        last_code = context.user_data.get("last_video_code")
+        if last_code:
+            # Taklif xabarini yaratish
+            share_text = "🎬 Sizga do'stingiz film yubordi!\n\n"
+            share_text += "📽️ Filmlar bazasidan maxsus tanlangan video\n"
+            share_text += "🎁 Bepul ko'rish imkoniyati\n\n"
+            share_text += f"👉 Video ni ko'rish uchun quyidagi botga kirib 'START' tugmasini bosing:\n"
+            share_text += f"{BOT_USERNAME}"
+            
+            # Ulashish uchun maxsus keyboard
+            keyboard = [
+                [InlineKeyboardButton("📤 Do'stga yuborish", url=f"https://t.me/share/url?url={BOT_USERNAME}&text={share_text}")],
+                [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
+            ]
+            
+            await query.message.reply_text(
+                f"✅ Do'stingizga taklif yuborish uchun quyidagi tugmani bosing.\n\n"
+                f"Do'stingiz botga start bosgandan so'ng video avtomatik ravishda ochiladi!",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
+        return
+
+    # ---------- ORQAGA TUGMASI ----------
+    elif data == "back_to_video":
+        # Orqaga qaytish logikasi
+        last_code = context.user_data.get("last_video_code")
+        if last_code:
+            # Video qayta yuborish
+            result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
+            if result:
+                file_id, extra_text = result
+                if last_code.startswith('http'):
+                    caption_text = f"Link: {last_code}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {last_code}\n{extra_text}\n{BOT_USERNAME}"
+                
+                await query.message.reply_video(file_id, caption=caption_text)
+                
+                # Tugmalarni qayta chiqarish
+                await send_callback_buttons(query, context)
+                
+                # Xabarni qayta chiqarish
+                await send_callback_caption(query, context)
         return
 
 # ---------- OWNER VIDEO HANDLER ----------
@@ -1493,23 +1590,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_video(file_id, caption=caption_text)
             
-            # TUGMALAR
-            button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-            if button_result:
-                button_text, button_url = button_result
-                keyboard = [
-                    [InlineKeyboardButton(button_text, url=button_url)],
-                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                ]
-                await update.message.reply_text(
-                    "Quyidagi tugmalardan foydalaning:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+            # ✅ HAR DOIM TUGMALAR CHIQSIN
+            await send_video_buttons(update, context)
             
-            # XABAR
-            caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-            if caption_result:
-                await update.message.reply_text(caption_result[0])
+            # ✅ HAR DOIM XABAR CHIQSIN
+            await send_video_caption(update, context)
             
         else:
             channels = fetch_all("SELECT channel FROM channels")
@@ -1550,23 +1635,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_video(file_id, caption=caption_text)
                 
-                # TUGMALAR
-                button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-                if button_result:
-                    button_text, button_url = button_result
-                    keyboard = [
-                        [InlineKeyboardButton(button_text, url=button_url)],
-                        [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                    ]
-                    await update.message.reply_text(
-                        "Quyidagi tugmalardan foydalaning:",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
+                # ✅ HAR DOIM TUGMALAR CHIQSIN
+                await send_video_buttons(update, context)
                 
-                # XABAR
-                caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-                if caption_result:
-                    await update.message.reply_text(caption_result[0])
+                # ✅ HAR DOIM XABAR CHIQSIN
+                await send_video_caption(update, context)
     else:
         # Agar video topilmasa
         await update.message.reply_text("Bunday kod/linkka film topilmadi! Iltimos, to'g'ri kod yoki linkni yuboring.")
