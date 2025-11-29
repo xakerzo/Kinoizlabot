@@ -4,6 +4,7 @@ import os
 import psycopg2
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
+import hashlib
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = 1373647
@@ -266,6 +267,27 @@ def is_admin(user_id):
     result = fetch_one("SELECT user_id FROM admins WHERE user_id=%s" if DATABASE_URL else "SELECT user_id FROM admins WHERE user_id=?", (user_id,))
     return result is not None
 
+# ---------- CALLBACK DATA YORDAMCHI FUNKSIYALARI ----------
+def create_safe_callback_data(code):
+    """Uzun kodlar (Instagram linklari) uchun xavfsiz callback data yaratish"""
+    if len(code) > 50:  # Agar kod juda uzun bo'lsa
+        # Hash yaratish
+        hash_object = hashlib.md5(code.encode())
+        short_code = hash_object.hexdigest()[:10]
+    else:
+        short_code = code
+    return short_code
+
+def get_original_code_from_callback(short_code):
+    """Qisqartirilgan kod orqali asl kodni topish"""
+    # Bazadan qidirish
+    films = fetch_all("SELECT code FROM films")
+    for film in films:
+        original_code = film[0]
+        if create_safe_callback_data(original_code) == short_code:
+            return original_code
+    return short_code  # Topilmasa, short_code ni qaytarish
+
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -318,9 +340,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Salom Admin! Tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         if is_premium:
-            await update.message.reply_text("🎉 Siz premium foydalanuvchisiz! Kanallarga obuna bo'lish shart emas.\n\nKino kodi kiriting:")
+            await update.message.reply_text("🎉 Siz premium foydalanuvchisiz! Kanallarga obuna bo'lish shart emas.\n\nKino kodi yoki Instagram linkini kiriting:")
         else:
-            await update.message.reply_text("Salom! Kino kodi kiriting:")
+            await update.message.reply_text("Salom! Kino kodi yoki Instagram linkini kiriting:")
 
 # ---------- CALLBACK HANDLER ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -363,7 +385,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- FOYDALANUVCHI OBUNA TEKSHIRISH ----------
     if data.startswith("check_subs_"):
-        code = data.split("_")[-1]
+        short_code = data.replace("check_subs_", "")
+        code = get_original_code_from_callback(short_code)
         
         # Premium tekshirish
         is_premium = is_premium_user(user_id)
@@ -372,7 +395,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (code,))
             if result:
                 file_id, extra_text = result
-                caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
+                # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+                if code.startswith('http'):
+                    caption_text = f"Link: {code}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
                 await query.message.reply_video(file_id, caption=caption_text)
                 
                 # YANGI TARTIB: Avval TUGMALAR
@@ -397,7 +424,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Oddiy foydalanuvchi uchun obuna tekshirish
         result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (code,))
         if not result:
-            await query.message.reply_text("Bunday kodga film topilmadi!")
+            await query.message.reply_text("Bunday kod/linkka film topilmadi!")
             return
         file_id, extra_text = result
 
@@ -424,7 +451,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 link_text, link_url = link_result
                 keyboard.append([InlineKeyboardButton(link_text, url=link_url)])
             
-            keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{code}")])
+            safe_code = create_safe_callback_data(code)
+            keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
             keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
             
             await query.message.reply_text(
@@ -432,7 +460,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
+            # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+            if code.startswith('http'):
+                caption_text = f"Link: {code}\n{extra_text}\n{BOT_USERNAME}"
+            else:
+                caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
             await query.message.reply_video(file_id, caption=caption_text)
             
             # YANGI TARTIB: Avval TUGMALAR
@@ -467,7 +499,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "search_video":
         context.user_data.clear()
         context.user_data["action"] = "search_video"
-        await query.message.reply_text("Qidiriladigan kodni yozing:")
+        await query.message.reply_text("Qidiriladigan kod yoki linkni yozing:")
         return
 
     elif data == "broadcast":
@@ -587,14 +619,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("update_"):
         context.user_data.clear()
-        old_code = data.split("_")[1]
+        old_short_code = data.split("_")[1]
+        old_code = get_original_code_from_callback(old_short_code)
         context.user_data["action"] = "update_code"
         context.user_data["old_code"] = old_code
         await query.message.reply_text(f"Yangi kodni yozing (eski kod: {old_code}):")
         return
 
     elif data.startswith("delete_"):
-        code = data.split("_")[1]
+        short_code = data.split("_")[1]
+        code = get_original_code_from_callback(short_code)
         execute_query("DELETE FROM films WHERE code=%s" if DATABASE_URL else "DELETE FROM films WHERE code=?", (code,))
         await query.message.reply_text(f"Video {code} o'chirildi!")
         return
@@ -925,25 +959,20 @@ async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     action = context.user_data.get("action")
     
-    if action == "upload_video":
-        context.user_data["video_file_id"] = update.message.video.file_id
-        context.user_data["action"] = "set_code"
-        await update.message.reply_text("Video qabul qilindi! Endi video uchun kodi yozing:")
-        return
-    
-    if not action or action == "upload_video":
-        context.user_data.clear()
-        context.user_data["video_file_id"] = update.message.video.file_id
-        context.user_data["action"] = "set_code"
-        await update.message.reply_text("Video qabul qilindi! Endi video uchun kodi yozing:")
-        return
-    
+    # Broadcast uchun video
     if action == "broadcast":
         context.user_data["broadcast_video"] = update.message.video.file_id
         context.user_data["broadcast_caption"] = update.message.caption or ""
         context.user_data["action"] = "confirm_broadcast"
         await update.message.reply_text("Video qabul qilindi! Broadcastni boshlash uchun 'HA' yozing yoki bekor qilish uchun boshqa narsa yozing.")
         return
+    
+    # BOSHQA HOLATLAR: Yangi video yuklash yoki action yo'q
+    context.user_data.clear()  # Avvalgi ma'lumotlarni tozalash
+    context.user_data["video_file_id"] = update.message.video.file_id
+    context.user_data["action"] = "set_code"
+    await update.message.reply_text("Video qabul qilindi! Endi video uchun kod yoki Instagram linkini yozing:")
+    return
 
 # ---------- OWNER PHOTO HANDLER ----------
 async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1010,7 +1039,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- OWNER ACTIONS ----------
     if user_id == OWNER_ID or is_admin(user_id):
-        # Video kodi qo'shish
+        # Video kodi qo'shish (har qanday matn: asd123 yoki Instagram link)
         if action == "set_code":
             file_id = context.user_data.get("video_file_id")
             if not file_id:
@@ -1018,10 +1047,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.clear()
                 return
             
-            # Kod bandligini tekshirish
+            # Kod bandligini tekshirish (har qanday matn uchun)
             existing = fetch_one("SELECT * FROM films WHERE code=%s" if DATABASE_URL else "SELECT * FROM films WHERE code=?", (text,))
             if existing:
-                await update.message.reply_text(f"⚠️ Bu kod band! Boshqa kod kiriting:")
+                await update.message.reply_text(f"⚠️ Bu kod/link band! Boshqa kod yoki link kiriting:")
                 return
                 
             if DATABASE_URL:
@@ -1032,13 +1061,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = fetch_one("SELECT extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT extra_text FROM films WHERE code=?", (text,))
             extra_text = result[0] if result else ""
             
-            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+            # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+            if text.startswith('http'):
+                caption_text = f"Link: {text}\n{extra_text}\n{BOT_USERNAME}"
+            else:
+                caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+            
+            # Callback data uchun kodni qisqartirish
+            safe_code = create_safe_callback_data(text)
             keyboard = [
-                [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
-                 InlineKeyboardButton("❌ Videoni o'chirish", callback_data=f"delete_{text}")]
+                [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{safe_code}"),
+                 InlineKeyboardButton("❌ Videoni o'chirish", callback_data=f"delete_{safe_code}")]
             ]
             await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=caption_text)
-            await update.message.reply_text(f"✅ Video saqlandi! Kod: {text}")
+            await update.message.reply_text(f"✅ Video saqlandi! {'Link' if text.startswith('http') else 'Kod'}: {text}")
             
             context.user_data["video_file_id"] = None
             context.user_data["action"] = "upload_video"
@@ -1049,14 +1085,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (text,))
             if result:
                 file_id, extra_text = result
-                caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+                # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+                if text.startswith('http'):
+                    caption_text = f"Link: {text}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+                
+                safe_code = create_safe_callback_data(text)
                 keyboard = [
-                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{text}"),
-                     InlineKeyboardButton("❌ Videoni o'chirish", callback_data=f"delete_{text}")]
+                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{safe_code}"),
+                     InlineKeyboardButton("❌ Videoni o'chirish", callback_data=f"delete_{safe_code}")]
                 ]
                 await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=caption_text)
             else:
-                await update.message.reply_text("Bunday kodga film topilmadi!")
+                await update.message.reply_text("Bunday kod/linkka film topilmadi!")
             context.user_data.clear()
             return
 
@@ -1163,11 +1205,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (new_code,))
             if result:
                 file_id, extra_text = result
+                # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+                if new_code.startswith('http'):
+                    caption_text = f"Link: {new_code}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {new_code}\n{extra_text}\n{BOT_USERNAME}"
+                
+                safe_code = create_safe_callback_data(new_code)
                 keyboard = [
-                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{new_code}"),
-                     InlineKeyboardButton("❌ Videoni o'chirish", callback_data=f"delete_{new_code}")]
+                    [InlineKeyboardButton("✏️ Kodni alishtirish", callback_data=f"update_{safe_code}"),
+                     InlineKeyboardButton("❌ Videoni o'chirish", callback_data=f"delete_{safe_code}")]
                 ]
-                await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=f"Kod: {new_code}\n{extra_text}\n{BOT_USERNAME}")
+                await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=caption_text)
             await update.message.reply_text(f"Video kodi yangilandi! Yangi kod: {new_code}")
             context.user_data.clear()
             return
@@ -1426,21 +1475,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # ---------- FOYDALANUVCHI KINO KO'RISH ----------
-    # User istalgan narsani yozsa (kod, link, matn), video qidiriladi
+    # User har qanday matn yuborsa (asd123 yoki Instagram link), video qidirish
     result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (text,))
     if result:
         file_id, extra_text = result
         
-        # OXIRGI VIDEO KODINI SAQLASH
         context.user_data["last_video_code"] = text
         
         is_premium = is_premium_user(user_id)
         
         if is_premium:
-            caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+            # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+            if text.startswith('http'):
+                caption_text = f"Link: {text}\n{extra_text}\n{BOT_USERNAME}"
+            else:
+                caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+            
             await update.message.reply_video(file_id, caption=caption_text)
             
-            # YANGI TARTIB: Avval TUGMALAR
+            # TUGMALAR
             button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
             if button_result:
                 button_text, button_url = button_result
@@ -1453,7 +1506,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             
-            # KEYIN XABAR
+            # XABAR
             caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
             if caption_result:
                 await update.message.reply_text(caption_result[0])
@@ -1474,13 +1527,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for ch in not_subscribed:
                     keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
                 
-                # YANGI: Kanal linkini qo'shish
+                # Kanal linkini qo'shish
                 link_result = fetch_one("SELECT link_text, link_url FROM channel_links ORDER BY id DESC LIMIT 1")
                 if link_result:
                     link_text, link_url = link_result
                     keyboard.append([InlineKeyboardButton(link_text, url=link_url)])
                 
-                keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{text}")])
+                safe_code = create_safe_callback_data(text)
+                keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
                 keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
                 
                 await update.message.reply_text(
@@ -1488,10 +1542,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             else:
-                caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+                # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+                if text.startswith('http'):
+                    caption_text = f"Link: {text}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
+                
                 await update.message.reply_video(file_id, caption=caption_text)
                 
-                # YANGI TARTIB: Avval TUGMALAR
+                # TUGMALAR
                 button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
                 if button_result:
                     button_text, button_url = button_result
@@ -1504,13 +1563,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
                 
-                # KEYIN XABAR
+                # XABAR
                 caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
                 if caption_result:
                     await update.message.reply_text(caption_result[0])
     else:
         # Agar video topilmasa
-        await update.message.reply_text("Bunday kodga film topilmadi!")
+        await update.message.reply_text("Bunday kod/linkka film topilmadi! Iltimos, to'g'ri kod yoki linkni yuboring.")
 
 # ---------- COMMAND HANDLER QO'SHIMCHALARI ----------
 async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
