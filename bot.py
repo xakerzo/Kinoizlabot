@@ -1041,14 +1041,13 @@ if data == "share_friend":
             [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
         ]
         
-        # await ni olib tashlash yoki async funksiya ichiga o'rab qo'yish kerak
         await query.message.reply_text(
             f"✅ Do'stingizga taklif yuborish uchun quyidagi tugmani bosing.\n\n"
             f"Do'stingiz botga start bosgandan so'ng video avtomatik ravishda ochiladi!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        return await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
+        await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
 
 # ---------- ORQAGA TUGMASI ----------
 elif data == "back_to_video":
