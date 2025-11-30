@@ -11,6 +11,7 @@ import hashlib
 OWNER_ID = 1373647
 BOT_TOKEN = os.environ.get('BOT_TOKEN', "8505113284:AAFu0vhU6j7d4tsaY5Rsn1qga57THZt3pEo")
 BOT_USERNAME = "@kinoni_izlabot"
+BOT_LINK = "https://t.me/kinoni_izlabot"
 
 # ---------- DATABASE ----------
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -383,15 +384,196 @@ async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Callback xabar yuborishda xatolik: {e}")
 
+# ---------- YANGI: DO'STLARGA YUBORISH FUNKSIYALARI ----------
+async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Do'stlarga yuborishni boshlash"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    # Foydalanuvchining oxirgi ko'rgan video kodini olish
+    last_code = context.user_data.get("last_video_code")
+    if not last_code:
+        await query.answer("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.", show_alert=True)
+        return
+    
+    # Video ma'lumotlarini olish
+    result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
+    if not result:
+        await query.answer("❌ Video topilmadi.", show_alert=True)
+        return
+    
+    file_id, extra_text = result
+    
+    # Do'stlarni tanlash uchun keyboard yaratish
+    keyboard = [
+        [InlineKeyboardButton("📤 Kontaktlarni ochish", switch_inline_query="")],
+        [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
+    ]
+    
+    await query.message.reply_text(
+        f"🎬 Video ulashish\n\n"
+        f"📹 Video: {last_code}\n\n"
+        f"Quyidagi tugma orqali do'stlaringizni tanlang va ularga video yuboring:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inline query handler - do'stlarga yuborish"""
+    query = update.inline_query
+    user_id = query.from_user.id
+    
+    if not query.query:
+        return
+    
+    # Foydalanuvchining oxirgi ko'rgan video kodini olish
+    last_code = context.user_data.get("last_video_code")
+    if not last_code:
+        return
+    
+    # Video ma'lumotlarini olish
+    result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
+    if not result:
+        return
+    
+    file_id, extra_text = result
+    
+    # Inline result yaratish
+    share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+    share_text += f"📹 Video kod: {last_code}\n"
+    if last_code.startswith('http'):
+        share_text += f"🔗 Link: {last_code}\n"
+    share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+    share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
+    
+    # Inline keyboard yaratish
+    keyboard = [
+        [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={last_code}")]
+    ]
+    
+    # Inline result
+    results = [
+        InlineQueryResultArticle(
+            id=hashlib.md5(last_code.encode()).hexdigest(),
+            title="📤 Do'stingizga video yuboring",
+            description=f"Video: {last_code}",
+            input_message_content=InputTextMessageContent(
+                message_text=share_text
+            ),
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    ]
+    
+    await query.answer(results)
+
+async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tanlangan inline result - do'stga yuborilganda"""
+    chosen_result = update.chosen_inline_result
+    user_id = chosen_result.from_user.id
+    result_id = chosen_result.result_id
+    
+    # Foydalanuvchining oxirgi ko'rgan video kodini olish
+    last_code = context.user_data.get("last_video_code")
+    if last_code:
+        # Yuborilgan do'stlar sonini hisoblash
+        context.user_data.setdefault("shared_count", 0)
+        context.user_data["shared_count"] += 1
+        
+        # Foydalanuvchiga xabar berish
+        try:
+            await context.bot.send_message(
+                user_id,
+                f"✅ Video {last_code} do'stingizga yuborildi!\n"
+                f"Jami yuborilgan do'stlar: {context.user_data['shared_count']}"
+            )
+        except:
+            pass
+
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    args = context.args
     
     if DATABASE_URL:
         execute_query("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
     else:
         execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
 
+    # Agar start parametri bilan kelgan bo'lsa (do'st yuborgan video)
+    if args and len(args) > 0:
+        video_code = args[0]
+        result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (video_code,))
+        
+        if result:
+            file_id, extra_text = result
+            
+            # ✅ MUHIM: Video kodini saqlash
+            context.user_data["last_video_code"] = video_code
+            
+            is_premium = is_premium_user(user_id)
+            
+            if is_premium:
+                # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+                if video_code.startswith('http'):
+                    caption_text = f"Link: {video_code}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {video_code}\n{extra_text}\n{BOT_USERNAME}"
+                
+                await update.message.reply_video(file_id, caption=caption_text)
+                
+                # ✅ HAR DOIM TUGMALAR CHIQSIN
+                await send_video_buttons(update, context)
+                
+                # ✅ HAR DOIM XABAR CHIQSIN
+                await send_video_caption(update, context)
+                
+            else:
+                channels = fetch_all("SELECT channel FROM channels")
+                not_subscribed = []
+                for c in channels:
+                    try:
+                        member = await context.bot.get_chat_member(c[0], user_id)
+                        if member.status in ["left", "kicked"]:
+                            not_subscribed.append(c[0])
+                    except:
+                        not_subscribed.append(c[0])
+
+                if not_subscribed:
+                    keyboard = []
+                    for ch in not_subscribed:
+                        keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
+                    
+                    # Kanal linkini qo'shish
+                    link_result = fetch_one("SELECT link_text, link_url FROM channel_links ORDER BY id DESC LIMIT 1")
+                    if link_result:
+                        link_text, link_url = link_result
+                        keyboard.append([InlineKeyboardButton(link_text, url=link_url)])
+                    
+                    safe_code = create_safe_callback_data(video_code)
+                    keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
+                    keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
+                    
+                    await update.message.reply_text(
+                        "Iltimos, kinoni ko'rishdan oldin quyidagi kanallarga obuna bo'ling:", 
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                else:
+                    # Agar link bo'lsa, caption ni boshqacha ko'rsatish
+                    if video_code.startswith('http'):
+                        caption_text = f"Link: {video_code}\n{extra_text}\n{BOT_USERNAME}"
+                    else:
+                        caption_text = f"Kod: {video_code}\n{extra_text}\n{BOT_USERNAME}"
+                    
+                    await update.message.reply_video(file_id, caption=caption_text)
+                    
+                    # ✅ HAR DOIM TUGMALAR CHIQSIN
+                    await send_video_buttons(update, context)
+                    
+                    # ✅ HAR DOIM XABAR CHIQSIN
+                    await send_video_caption(update, context)
+            
+            return  # Video ko'rsatilgandan keyin start xabarini ko'rsatmaslik
+
+    # Oddiy start komandasi
     is_premium = is_premium_user(user_id)
 
     # Hamkorlar matnini olish
@@ -478,6 +660,34 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ---------- DO'STLARGA YUBORISH TUGMASI ----------
+    elif data == "share_friend":
+        await start_share_friend(update, context)
+        return
+
+    # ---------- ORQAGA TUGMASI ----------
+    elif data == "back_to_video":
+        # Orqaga qaytish logikasi
+        last_code = context.user_data.get("last_video_code")
+        if last_code:
+            # Video qayta yuborish
+            result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
+            if result:
+                file_id, extra_text = result
+                if last_code.startswith('http'):
+                    caption_text = f"Link: {last_code}\n{extra_text}\n{BOT_USERNAME}"
+                else:
+                    caption_text = f"Kod: {last_code}\n{extra_text}\n{BOT_USERNAME}"
+                
+                await query.message.reply_video(file_id, caption=caption_text)
+                
+                # Tugmalarni qayta chiqarish
+                await send_callback_buttons(query, context)
+                
+                # Xabarni qayta chiqarish
+                await send_callback_caption(query, context)
+        return
+
     # ---------- FOYDALANUVCHI OBUNA TEKSHIRISH ----------
     if data.startswith("check_subs_"):
         short_code = data.replace("check_subs_", "")
@@ -496,6 +706,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
                 await query.message.reply_video(file_id, caption=caption_text)
+                
+                # ✅ MUHIM: Video kodini saqlash
+                context.user_data["last_video_code"] = code
                 
                 # ✅ HAR DOIM TUGMALAR CHIQSIN
                 await send_callback_buttons(query, context)
@@ -550,67 +763,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption_text = f"Kod: {code}\n{extra_text}\n{BOT_USERNAME}"
             await query.message.reply_video(file_id, caption=caption_text)
             
+            # ✅ MUHIM: Video kodini saqlash
+            context.user_data["last_video_code"] = code
+            
             # ✅ HAR DOIM TUGMALAR CHIQSIN
             await send_callback_buttons(query, context)
             
             # ✅ HAR DOIM XABAR CHIQSIN
             await send_callback_caption(query, context)
-        return
-
-    # ---------- DO'STLARGA YUBORISH TUGMASI ----------
-    elif data == "share_friend":
-        # Userning oxirgi ko'rgan video kodini olish
-        last_code = context.user_data.get("last_video_code")
-        if last_code:
-            # Oddiy va aniq taklif xabari
-            share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
-            share_text += f"📹 Video kod: {last_code}\n"
-            share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
-            share_text += f"Botga kirib '{last_code}' kodini yuboring va videoni ko'ring!"
-            
-            # Textni URL encode qilish
-            import urllib.parse
-            encoded_text = urllib.parse.quote(share_text)
-            
-            # Telegram share link
-            share_url = f"https://t.me/share/url?text={encoded_text}"
-            
-            # Ulashish uchun keyboard
-            keyboard = [
-                [InlineKeyboardButton("📤 Do'stga yuborish", url=share_url)],
-                [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
-            ]
-            
-            await query.message.reply_text(
-                f"✅ Do'stingizga video ulashish uchun tugmani bosing.\n"
-                f"📝 Ular botga '{last_code}' kodini yuborishlari kerak.",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
-        return
-
-    # ---------- ORQAGA TUGMASI ----------
-    elif data == "back_to_video":
-        # Orqaga qaytish logikasi
-        last_code = context.user_data.get("last_video_code")
-        if last_code:
-            # Video qayta yuborish
-            result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
-            if result:
-                file_id, extra_text = result
-                if last_code.startswith('http'):
-                    caption_text = f"Link: {last_code}\n{extra_text}\n{BOT_USERNAME}"
-                else:
-                    caption_text = f"Kod: {last_code}\n{extra_text}\n{BOT_USERNAME}"
-                
-                await query.message.reply_video(file_id, caption=caption_text)
-                
-                # Tugmalarni qayta chiqarish
-                await send_callback_buttons(query, context)
-                
-                # Xabarni qayta chiqarish
-                await send_callback_caption(query, context)
         return
 
     # ---------- OWNER TUGMALARI ----------
@@ -988,47 +1148,47 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("✅ Video xabari o'chirildi!")
         return
 
-# ---------- YANGI VIDEO BUTTON TUGMALARI ----------
-elif data == "video_button_manage":
-    if user_id != OWNER_ID:
-        await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
+    # ---------- YANGI VIDEO BUTTON TUGMALARI ----------
+    elif data == "video_button_manage":
+        if user_id != OWNER_ID:
+            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
+            return
+        keyboard = [
+            [InlineKeyboardButton("➕ Tugma qo'shish", callback_data="add_video_button")],
+            [InlineKeyboardButton("🔍 Tugmani ko'rish", callback_data="view_video_button")],
+            [InlineKeyboardButton("🗑 Tugmani o'chirish", callback_data="delete_video_button")]
+        ]
+        await query.message.reply_text(
+            "Video ostidagi tugmani boshqarish:", 
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
-    keyboard = [
-        [InlineKeyboardButton("➕ Tugma qo'shish", callback_data="add_video_button")],
-        [InlineKeyboardButton("🔍 Tugmani ko'rish", callback_data="view_video_button")],
-        [InlineKeyboardButton("🗑 Tugmani o'chirish", callback_data="delete_video_button")]
-    ]
-    await query.message.reply_text(
-        "Video ostidagi tugmani boshqarish:", 
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    return
 
-elif data == "add_video_button":
-    if user_id != OWNER_ID:
+    elif data == "add_video_button":
+        if user_id != OWNER_ID:
+            return
+        context.user_data.clear()
+        context.user_data["action"] = "add_video_button_text"
+        await query.message.reply_text("Tugma matnini yozing (masalan: 📺 Bizning kanal):")
         return
-    context.user_data.clear()
-    context.user_data["action"] = "add_video_button_text"
-    await query.message.reply_text("Tugma matnini yozing (masalan: 📺 Bizning kanal):")
-    return
 
-elif data == "view_video_button":
-    if user_id != OWNER_ID:
+    elif data == "view_video_button":
+        if user_id != OWNER_ID:
+            return
+        result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
+        if result:
+            button_text, button_url = result
+            await query.message.reply_text(f"Joriy video tugmasi:\nMatn: {button_text}\nLink: {button_url}")
+        else:
+            await query.message.reply_text("Hali video tugmasi qo'shilmagan.")
         return
-    result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-    if result:
-        button_text, button_url = result
-        await query.message.reply_text(f"Joriy video tugmasi:\nMatn: {button_text}\nLink: {button_url}")
-    else:
-        await query.message.reply_text("Hali video tugmasi qo'shilmagan.")
-    return
 
-elif data == "delete_video_button":
-    if user_id != OWNER_ID:
+    elif data == "delete_video_button":
+        if user_id != OWNER_ID:
+            return
+        execute_query("DELETE FROM video_buttons")
+        await query.message.reply_text("✅ Video tugmasi o'chirildi! Endi video ostida tugma chiqmaydi.")
         return
-    execute_query("DELETE FROM video_buttons")
-    await query.message.reply_text("✅ Video tugmasi o'chirildi! Endi video ostida tugma chiqmaydi.")
-    return
 
     # ---------- YANGI CHANNEL LINK TUGMALARI ----------
     elif data == "channel_link_manage":
@@ -1718,6 +1878,8 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Xatolik! User ID va kunlar sonini to'g'ri kiriting.")
 
 # ---------- APPLICATION ----------
+from telegram import InlineQueryResultArticle, InputTextMessageContent
+
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("premium", premium_command))
@@ -1725,6 +1887,10 @@ app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(filters.VIDEO, handle_owner_video))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+# YANGI: Inline query handlerlar
+app.add_handler(InlineQueryHandler(handle_inline_query))
+app.add_handler(ChosenInlineResultHandler(handle_chosen_inline_result))
 
 if __name__ == '__main__':
     print("Bot ishga tushdi...")
