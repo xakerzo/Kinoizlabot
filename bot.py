@@ -1,5 +1,5 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, InlineQueryHandler, ChosenInlineResultHandler
 import urllib.parse
 import os
 import psycopg2
@@ -1878,8 +1878,6 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Xatolik! User ID va kunlar sonini to'g'ri kiriting.")
 
 # ---------- APPLICATION ----------
-from telegram import InlineQueryResultArticle, InputTextMessageContent
-
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("premium", premium_command))
