@@ -1017,7 +1017,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 # ---------- DO'STLARGA YUBORISH TUGMASI ----------
-if data == "share_friend":  # elif ni if ga o'zgartirdim
+if data == "share_friend":
     # Userning oxirgi ko'rgan video kodini olish
     last_code = context.user_data.get("last_video_code")
     if last_code:
@@ -1041,14 +1041,14 @@ if data == "share_friend":  # elif ni if ga o'zgartirdim
             [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
         ]
         
-        await query.message.reply_text(
+        # await ni olib tashlash yoki async funksiya ichiga o'rab qo'yish kerak
+        return await query.message.reply_text(
             f"✅ Do'stingizga taklif yuborish uchun quyidagi tugmani bosing.\n\n"
             f"Do'stingiz botga start bosgandan so'ng video avtomatik ravishda ochiladi!",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
-    return
+        return await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
 
 # ---------- ORQAGA TUGMASI ----------
 elif data == "back_to_video":
