@@ -82,6 +82,14 @@ if DATABASE_URL:
         )
     """)
     
+    # YANGI: Video ostidagi matn uchun jadval
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS video_captions (
+            id SERIAL PRIMARY KEY,
+            caption_text TEXT NOT NULL
+        )
+    """)
+    
 else:
     # Lokal SQLite uchun
     import sqlite3
@@ -137,6 +145,14 @@ else:
         CREATE TABLE IF NOT EXISTS ad_texts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             text TEXT NOT NULL
+        )
+    """)
+    
+    # YANGI: Video ostidagi matn uchun jadval
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS video_captions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            caption_text TEXT NOT NULL
         )
     """)
 
@@ -195,26 +211,60 @@ def is_premium_user(user_id):
     else:
         return datetime.fromisoformat(expiry_date) > datetime.now()
 
-# ---------- CALLBACK DATA YORDAMCHI FUNKSIYALARI ----------
-def create_safe_callback_data(code):
-    """Uzun kodlar (Instagram linklari) uchun xavfsiz callback data yaratish"""
-    if len(code) > 50:
-        hash_object = hashlib.md5(code.encode())
-        short_code = hash_object.hexdigest()[:10]
-    else:
-        short_code = code
-    return short_code
+# ---------- VIDEO OSTIDAGI MATN FUNKSIYALARI ----------
+async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Video dan keyin matn yuborish"""
+    try:
+        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        
+        if caption_result:
+            # Matn bilan birga boshqaruv tugmalari
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await update.message.reply_text(
+                caption_result[0],
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Agar matn bo'lmasa, faqat do'stlarga yuborish tugmasi
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await update.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    except Exception as e:
+        print(f"Matn yuborishda xatolik: {e}")
 
-def get_original_code_from_callback(short_code):
-    """Qisqartirilgan kod orqali asl kodni topish"""
-    films = fetch_all("SELECT code FROM films")
-    for film in films:
-        original_code = film[0]
-        if create_safe_callback_data(original_code) == short_code:
-            return original_code
-    return short_code
+async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE):
+    """Callback uchun video matnini yuborish"""
+    try:
+        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        
+        if caption_result:
+            # Matn bilan birga boshqaruv tugmalari
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await query.message.reply_text(
+                caption_result[0],
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Agar matn bo'lmasa, faqat do'stlarga yuborish tugmasi
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await query.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    except Exception as e:
+        print(f"Callback matn yuborishda xatolik: {e}")
 
-# ---------- YANGI: DO'STLARGA YUBORISH FUNKSIYALARI ----------
+# ---------- DO'STLARGA YUBORISH FUNKSIYALARI ----------
 async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Do'stlarga yuborishni boshlash"""
     query = update.callback_query
@@ -379,14 +429,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_video(file_id, caption=caption_text)
                 
-                # ✅ HAR DOIM TUGMALAR CHIQSIN
-                keyboard = [
-                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                ]
-                await update.message.reply_text(
-                    "Quyidagi tugmalardan foydalaning:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+                # ✅ VIDEO OSTIDA MATN CHIQSIN
+                await send_video_caption(update, context)
                 
             else:
                 channels = fetch_all("SELECT channel FROM channels")
@@ -421,14 +465,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     await update.message.reply_video(file_id, caption=caption_text)
                     
-                    # ✅ HAR DOIM TUGMALAR CHIQSIN
-                    keyboard = [
-                        [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                    ]
-                    await update.message.reply_text(
-                        "Quyidagi tugmalardan foydalaning:",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
+                    # ✅ VIDEO OSTIDA MATN CHIQSIN
+                    await send_video_caption(update, context)
             
             return  # Video ko'rsatilgandan keyin start xabarini ko'rsatmaslik
 
@@ -457,6 +495,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🤝 Hamkorlar", callback_data="manage_partners")],
             [InlineKeyboardButton("🎫 Reklama sozlamalari", callback_data="ad_settings")],
             [InlineKeyboardButton("👤 Premium boshqarish", callback_data="premium_management")],
+            [InlineKeyboardButton("📝 Video ostidagi matn", callback_data="video_caption_manage")],
             [InlineKeyboardButton(f"👥 Foydalanuvchilar: {user_count}", callback_data="user_count")],
         ]
         
@@ -466,6 +505,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🎉 Siz premium foydalanuvchisiz! Kanallarga obuna bo'lish shart emas.\n\nKino kodi yoki Instagram linkini kiriting:")
         else:
             await update.message.reply_text("Salom! Kino kodi yoki Instagram linkini kiriting:")
+
+# ---------- CALLBACK DATA YORDAMCHI FUNKSIYALARI ----------
+def create_safe_callback_data(code):
+    """Uzun kodlar (Instagram linklari) uchun xavfsiz callback data yaratish"""
+    if len(code) > 50:
+        hash_object = hashlib.md5(code.encode())
+        short_code = hash_object.hexdigest()[:10]
+    else:
+        short_code = code
+    return short_code
+
+def get_original_code_from_callback(short_code):
+    """Qisqartirilgan kod orqali asl kodni topish"""
+    films = fetch_all("SELECT code FROM films")
+    for film in films:
+        original_code = film[0]
+        if create_safe_callback_data(original_code) == short_code:
+            return original_code
+    return short_code
 
 # ---------- CALLBACK HANDLER ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,6 +540,47 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ---------- DO'STLARGA YUBORISH TUGMASI ----------
     if data == "share_friend":
         await start_share_friend(update, context)
+        return
+
+    # ---------- VIDEO OSTIDAGI MATN BOSHQARISH ----------
+    elif data == "video_caption_manage":
+        if user_id != OWNER_ID:
+            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
+            return
+        keyboard = [
+            [InlineKeyboardButton("➕ Matn qo'shish", callback_data="add_video_caption")],
+            [InlineKeyboardButton("🔍 Matnni ko'rish", callback_data="view_video_caption")],
+            [InlineKeyboardButton("🗑 Matnni o'chirish", callback_data="delete_video_caption")]
+        ]
+        await query.message.reply_text(
+            "Video ostidagi matnni boshqarish:", 
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    elif data == "add_video_caption":
+        if user_id != OWNER_ID:
+            return
+        context.user_data.clear()
+        context.user_data["action"] = "add_video_caption"
+        await query.message.reply_text("Video dan keyin chiqadigan matnni yozing:")
+        return
+
+    elif data == "view_video_caption":
+        if user_id != OWNER_ID:
+            return
+        result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        if result:
+            await query.message.reply_text(f"📝 Joriy video matni:\n\n{result[0]}")
+        else:
+            await query.message.reply_text("📝 Hali video matni qo'shilmagan.")
+        return
+
+    elif data == "delete_video_caption":
+        if user_id != OWNER_ID:
+            return
+        execute_query("DELETE FROM video_captions")
+        await query.message.reply_text("✅ Video matni o'chirildi! Endi video dan keyin matn chiqmaydi.")
         return
 
     # ---------- REKLAMA BYPASS TUGMASI ----------
@@ -533,14 +632,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # ✅ MUHIM: Video kodini saqlash
                 context.user_data["last_video_code"] = code
                 
-                # ✅ HAR DOIM TUGMALAR CHIQSIN
-                keyboard = [
-                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                ]
-                await query.message.reply_text(
-                    "Quyidagi tugmalardan foydalaning:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+                # ✅ VIDEO OSTIDA MATN CHIQSIN
+                await send_callback_caption(query, context)
             return
 
         # Oddiy foydalanuvchi uchun obuna tekshirish
@@ -586,14 +679,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # ✅ MUHIM: Video kodini saqlash
             context.user_data["last_video_code"] = code
             
-            # ✅ HAR DOIM TUGMALAR CHIQSIN
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await query.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            # ✅ VIDEO OSTIDA MATN CHIQSIN
+            await send_callback_caption(query, context)
         return
 
     # ---------- OWNER TUGMALARI ----------
@@ -937,6 +1024,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- OWNER ACTIONS ----------
     if user_id == OWNER_ID:
+        # Video ostidagi matn qo'shish
+        if action == "add_video_caption":
+            execute_query("INSERT INTO video_captions (caption_text) VALUES (%s)" if DATABASE_URL else "INSERT INTO video_captions (caption_text) VALUES (?)", (text,))
+            await update.message.reply_text("✅ Video ostidagi matn saqlandi! Endi barcha videolardan keyin bu matn chiqadi.")
+            context.user_data.clear()
+            return
+
         # Video kodi qo'shish (har qanday matn: asd123 yoki Instagram link)
         if action == "set_code":
             file_id = context.user_data.get("video_file_id")
@@ -1277,14 +1371,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_video(file_id, caption=caption_text)
             
-            # ✅ HAR DOIM TUGMALAR CHIQSIN
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await update.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            # ✅ VIDEO OSTIDA MATN CHIQSIN
+            await send_video_caption(update, context)
             
         else:
             channels = fetch_all("SELECT channel FROM channels")
@@ -1319,14 +1407,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_video(file_id, caption=caption_text)
                 
-                # ✅ HAR DOIM TUGMALAR CHIQSIN
-                keyboard = [
-                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-                ]
-                await update.message.reply_text(
-                    "Quyidagi tugmalardan foydalaning:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
+                # ✅ VIDEO OSTIDA MATN CHIQSIN
+                await send_video_caption(update, context)
     else:
         # Agar video topilmasa
         await update.message.reply_text("Bunday kod/linkka film topilmadi! Iltimos, to'g'ri kod yoki linkni yuboring.")
