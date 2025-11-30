@@ -1042,7 +1042,7 @@ if data == "share_friend":
         ]
         
         # await ni olib tashlash yoki async funksiya ichiga o'rab qo'yish kerak
-        return await query.message.reply_text(
+                await query.message.reply_text(
             f"✅ Do'stingizga taklif yuborish uchun quyidagi tugmani bosing.\n\n"
             f"Do'stingiz botga start bosgandan so'ng video avtomatik ravishda ochiladi!",
             reply_markup=InlineKeyboardMarkup(keyboard)
