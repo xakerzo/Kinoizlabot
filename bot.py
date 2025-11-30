@@ -558,7 +558,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ---------- DO'STLARGA YUBORISH TUGMASI ----------
-elif data == "share_friend":
+    elif data == "share_friend":
     # Userning oxirgi ko'rgan video kodini olish
     last_code = context.user_data.get("last_video_code")
     if last_code:
