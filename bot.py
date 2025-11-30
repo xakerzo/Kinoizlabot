@@ -562,33 +562,28 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Userning oxirgi ko'rgan video kodini olish
     last_code = context.user_data.get("last_video_code")
     if last_code:
-        # ✅ TELEGRAM BOT DEEPLINK YARATISH
-        # Bu havola bosilganda bot avtomatik start beradi va video kodini yuboradi
-        deep_link = f"https://t.me/{BOT_USERNAME[1:]}?start={last_code}"
-        
-        # Taklif xabarini yaratish
-        share_text = "🎬 Sizga do'stingiz film yubordi!\n\n"
-        share_text += "📽️ Filmlar bazasidan maxsus tanlangan video\n"
-        share_text += "🎁 Bepul ko'rish imkoniyati\n\n"
-        share_text += f"👉 Video ni ko'rish uchun quyidagi havolani bosing:\n"
-        share_text += f"{deep_link}"
+        # Oddiy va aniq taklif xabari
+        share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+        share_text += f"📹 Video kod: {last_code}\n"
+        share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+        share_text += f"Botga kirib '{last_code}' kodini yuboring va videoni ko'ring!"
         
         # Textni URL encode qilish
         import urllib.parse
         encoded_text = urllib.parse.quote(share_text)
         
-        # ✅ TO'G'RI TELEGRAM SHARE LINK
+        # Telegram share link
         share_url = f"https://t.me/share/url?text={encoded_text}"
         
-        # Ulashish uchun maxsus keyboard
+        # Ulashish uchun keyboard
         keyboard = [
             [InlineKeyboardButton("📤 Do'stga yuborish", url=share_url)],
             [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
         ]
         
         await query.message.reply_text(
-            f"✅ Do'stingizga taklif yuborish uchun quyidagi tugmani bosing.\n\n"
-            f"Do'stingiz havolani bosganda avtomatik video ochiladi!",
+            f"✅ Do'stingizga video ulashish uchun tugmani bosing.\n"
+            f"📝 Ular botga '{last_code}' kodini yuborishlari kerak.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
