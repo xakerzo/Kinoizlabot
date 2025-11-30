@@ -559,36 +559,36 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- DO'STLARGA YUBORISH TUGMASI ----------
     elif data == "share_friend":
-    # Userning oxirgi ko'rgan video kodini olish
-    last_code = context.user_data.get("last_video_code")
-    if last_code:
-        # Oddiy va aniq taklif xabari
-        share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
-        share_text += f"📹 Video kod: {last_code}\n"
-        share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
-        share_text += f"Botga kirib '{last_code}' kodini yuboring va videoni ko'ring!"
-        
-        # Textni URL encode qilish
-        import urllib.parse
-        encoded_text = urllib.parse.quote(share_text)
-        
-        # Telegram share link
-        share_url = f"https://t.me/share/url?text={encoded_text}"
-        
-        # Ulashish uchun keyboard
-        keyboard = [
-            [InlineKeyboardButton("📤 Do'stga yuborish", url=share_url)],
-            [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
-        ]
-        
-        await query.message.reply_text(
-            f"✅ Do'stingizga video ulashish uchun tugmani bosing.\n"
-            f"📝 Ular botga '{last_code}' kodini yuborishlari kerak.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    else:
-        await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
-    return
+        # Userning oxirgi ko'rgan video kodini olish
+        last_code = context.user_data.get("last_video_code")
+        if last_code:
+            # Oddiy va aniq taklif xabari
+            share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+            share_text += f"📹 Video kod: {last_code}\n"
+            share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+            share_text += f"Botga kirib '{last_code}' kodini yuboring va videoni ko'ring!"
+            
+            # Textni URL encode qilish
+            import urllib.parse
+            encoded_text = urllib.parse.quote(share_text)
+            
+            # Telegram share link
+            share_url = f"https://t.me/share/url?text={encoded_text}"
+            
+            # Ulashish uchun keyboard
+            keyboard = [
+                [InlineKeyboardButton("📤 Do'stga yuborish", url=share_url)],
+                [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
+            ]
+            
+            await query.message.reply_text(
+                f"✅ Do'stingizga video ulashish uchun tugmani bosing.\n"
+                f"📝 Ular botga '{last_code}' kodini yuborishlari kerak.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await query.message.reply_text("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.")
+        return
 
     # ---------- ORQAGA TUGMASI ----------
     elif data == "back_to_video":
@@ -1602,6 +1602,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result:
         file_id, extra_text = result
         
+        # ✅ MUHIM: Video kodini saqlash
         context.user_data["last_video_code"] = text
         
         is_premium = is_premium_user(user_id)
