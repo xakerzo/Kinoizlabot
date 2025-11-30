@@ -82,38 +82,6 @@ if DATABASE_URL:
         )
     """)
     
-    # YANGI JADVALLAR
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS video_captions (
-            id SERIAL PRIMARY KEY,
-            caption_text TEXT NOT NULL
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS video_buttons (
-            id SERIAL PRIMARY KEY,
-            button_text TEXT NOT NULL,
-            button_url TEXT NOT NULL
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS channel_links (
-            id SERIAL PRIMARY KEY,
-            link_text TEXT NOT NULL,
-            link_url TEXT NOT NULL
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS admins (
-            user_id BIGINT PRIMARY KEY,
-            added_by BIGINT,
-            added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
 else:
     # Lokal SQLite uchun
     import sqlite3
@@ -171,38 +139,6 @@ else:
             text TEXT NOT NULL
         )
     """)
-    
-    # YANGI JADVALLAR
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS video_captions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            caption_text TEXT NOT NULL
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS video_buttons (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            button_text TEXT NOT NULL,
-            button_url TEXT NOT NULL
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS channel_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            link_text TEXT NOT NULL,
-            link_url TEXT NOT NULL
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS admins (
-            user_id INTEGER PRIMARY KEY,
-            added_by INTEGER,
-            added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
 
 conn.commit()
 
@@ -254,26 +190,15 @@ def is_premium_user(user_id):
     
     expiry_date = result[0]
     
-    # PostgreSQL dan datetime obyekt qaytadi, SQLite dan string
     if isinstance(expiry_date, datetime):
-        # PostgreSQL - to'g'ridan-to'g'ri datetime
         return expiry_date > datetime.now()
     else:
-        # SQLite - string, convert qilish kerak
         return datetime.fromisoformat(expiry_date) > datetime.now()
-
-def is_admin(user_id):
-    """Admin foydalanuvchini tekshirish"""
-    if user_id == OWNER_ID:
-        return True
-    result = fetch_one("SELECT user_id FROM admins WHERE user_id=%s" if DATABASE_URL else "SELECT user_id FROM admins WHERE user_id=?", (user_id,))
-    return result is not None
 
 # ---------- CALLBACK DATA YORDAMCHI FUNKSIYALARI ----------
 def create_safe_callback_data(code):
     """Uzun kodlar (Instagram linklari) uchun xavfsiz callback data yaratish"""
-    if len(code) > 50:  # Agar kod juda uzun bo'lsa
-        # Hash yaratish
+    if len(code) > 50:
         hash_object = hashlib.md5(code.encode())
         short_code = hash_object.hexdigest()[:10]
     else:
@@ -282,107 +207,12 @@ def create_safe_callback_data(code):
 
 def get_original_code_from_callback(short_code):
     """Qisqartirilgan kod orqali asl kodni topish"""
-    # Bazadan qidirish
     films = fetch_all("SELECT code FROM films")
     for film in films:
         original_code = film[0]
         if create_safe_callback_data(original_code) == short_code:
             return original_code
-    return short_code  # Topilmasa, short_code ni qaytarish
-
-# ---------- YANGI FUNKSIYALAR: TUGMA VA XABARLARNI YUBORISH ----------
-async def send_video_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Video tugmalarini yuborish"""
-    try:
-        button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-        
-        if button_result:
-            button_text, button_url = button_result
-            
-            # ✅ URL ni tekshirish va to'g'rilash
-            if button_url.startswith('@'):
-                # Agar @ bilan boshlansa, Telegram linkiga aylantirish
-                button_url = f"https://t.me/{button_url[1:]}"
-            elif not button_url.startswith(('http://', 'https://')):
-                # Agar http(s) bo'lmasa, https qo'shamiz
-                button_url = f"https://{button_url}"
-            
-            keyboard = [
-                [InlineKeyboardButton(button_text, url=button_url)],
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await update.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            # Agar tugma bo'lmasa, faqat ulashish tugmasini chiqaramiz
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await update.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-    except Exception as e:
-        print(f"Tugma yuborishda xatolik: {e}")
-
-async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Video xabarini yuborish"""
-    try:
-        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-        
-        if caption_result:
-            await update.message.reply_text(caption_result[0])
-    except Exception as e:
-        print(f"Xabar yuborishda xatolik: {e}")
-
-# ---------- CALLBACK UCHUN YANGI FUNKSIYALAR ----------
-async def send_callback_buttons(query, context: ContextTypes.DEFAULT_TYPE):
-    """Callback uchun video tugmalarini yuborish"""
-    try:
-        button_result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-        
-        if button_result:
-            button_text, button_url = button_result
-            
-            # ✅ URL ni tekshirish va to'g'rilash
-            if button_url.startswith('@'):
-                # Agar @ bilan boshlansa, Telegram linkiga aylantirish
-                button_url = f"https://t.me/{button_url[1:]}"
-            elif not button_url.startswith(('http://', 'https://')):
-                # Agar http(s) bo'lmasa, https qo'shamiz
-                button_url = f"https://{button_url}"
-            
-            keyboard = [
-                [InlineKeyboardButton(button_text, url=button_url)],
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await query.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            # Agar tugma bo'lmasa, faqat ulashish tugmasini chiqaramiz
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await query.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-    except Exception as e:
-        print(f"Callback tugma yuborishda xatolik: {e}")
-
-async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE):
-    """Callback uchun video xabarini yuborish"""
-    try:
-        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-        
-        if caption_result:
-            await query.message.reply_text(caption_result[0])
-    except Exception as e:
-        print(f"Callback xabar yuborishda xatolik: {e}")
+    return short_code
 
 # ---------- YANGI: DO'STLARGA YUBORISH FUNKSIYALARI ----------
 async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -402,19 +232,18 @@ async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌ Video topilmadi.", show_alert=True)
         return
     
-    file_id, extra_text = result
-    
-    # Do'stlarni tanlash uchun keyboard yaratish
-    keyboard = [
-        [InlineKeyboardButton("📤 Kontaktlarni ochish", switch_inline_query="")],
-        [InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_video")]
-    ]
-    
     await query.message.reply_text(
         f"🎬 Video ulashish\n\n"
         f"📹 Video: {last_code}\n\n"
-        f"Quyidagi tugma orqali do'stlaringizni tanlang va ularga video yuboring:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        f"Do'stlaringizga video yuborish uchun quyidagi tugmani bosing va kontaktlaringizdan birini tanlang:"
+    )
+    
+    # Inline query ni boshlash uchun xabar
+    await query.message.reply_text(
+        "📤 Do'stingizga video yuborish uchun quyidagi tugmani bosing:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📤 Do'stlarga yuborish", switch_inline_query="")
+        ]])
     )
 
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -422,38 +251,68 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.inline_query
     user_id = query.from_user.id
     
-    if not query.query:
-        return
-    
     # Foydalanuvchining oxirgi ko'rgan video kodini olish
     last_code = context.user_data.get("last_video_code")
     if not last_code:
+        # Agar last_code bo'lmasa, so'nggi 10 ta videoni ko'rsatish
+        films = fetch_all("SELECT code FROM films ORDER BY code LIMIT 10")
+        if not films:
+            return
+        
+        results = []
+        for film in films:
+            video_code = film[0]
+            
+            share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+            if video_code.startswith('http'):
+                share_text += f"🔗 Link: {video_code}\n"
+            else:
+                share_text += f"📹 Video kod: {video_code}\n"
+            share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+            share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
+            
+            keyboard = [
+                [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(video_code)}")]
+            ]
+            
+            results.append(
+                InlineQueryResultArticle(
+                    id=hashlib.md5(video_code.encode()).hexdigest()[:64],
+                    title=f"📹 Video: {video_code[:30]}{'...' if len(video_code) > 30 else ''}",
+                    description=f"Do'stingizga video yuboring - {video_code}",
+                    input_message_content=InputTextMessageContent(
+                        message_text=share_text
+                    ),
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            )
+        
+        await query.answer(results)
         return
     
-    # Video ma'lumotlarini olish
+    # Agar last_code bo'lsa, faqat o'sha videoni ko'rsatish
     result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
     if not result:
         return
     
-    file_id, extra_text = result
-    
     # Inline result yaratish
     share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
-    share_text += f"📹 Video kod: {last_code}\n"
     if last_code.startswith('http'):
         share_text += f"🔗 Link: {last_code}\n"
+    else:
+        share_text += f"📹 Video kod: {last_code}\n"
     share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
     share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
     
     # Inline keyboard yaratish
     keyboard = [
-        [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={last_code}")]
+        [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(last_code)}")]
     ]
     
     # Inline result
     results = [
         InlineQueryResultArticle(
-            id=hashlib.md5(last_code.encode()).hexdigest(),
+            id=hashlib.md5(last_code.encode()).hexdigest()[:64],
             title="📤 Do'stingizga video yuboring",
             description=f"Video: {last_code}",
             input_message_content=InputTextMessageContent(
@@ -500,7 +359,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Agar start parametri bilan kelgan bo'lsa (do'st yuborgan video)
     if args and len(args) > 0:
-        video_code = args[0]
+        video_code = urllib.parse.unquote(args[0])
         result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (video_code,))
         
         if result:
@@ -521,10 +380,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_video(file_id, caption=caption_text)
                 
                 # ✅ HAR DOIM TUGMALAR CHIQSIN
-                await send_video_buttons(update, context)
-                
-                # ✅ HAR DOIM XABAR CHIQSIN
-                await send_video_caption(update, context)
+                keyboard = [
+                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+                ]
+                await update.message.reply_text(
+                    "Quyidagi tugmalardan foydalaning:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
                 
             else:
                 channels = fetch_all("SELECT channel FROM channels")
@@ -541,12 +403,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     keyboard = []
                     for ch in not_subscribed:
                         keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
-                    
-                    # Kanal linkini qo'shish
-                    link_result = fetch_one("SELECT link_text, link_url FROM channel_links ORDER BY id DESC LIMIT 1")
-                    if link_result:
-                        link_text, link_url = link_result
-                        keyboard.append([InlineKeyboardButton(link_text, url=link_url)])
                     
                     safe_code = create_safe_callback_data(video_code)
                     keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
@@ -566,10 +422,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_video(file_id, caption=caption_text)
                     
                     # ✅ HAR DOIM TUGMALAR CHIQSIN
-                    await send_video_buttons(update, context)
-                    
-                    # ✅ HAR DOIM XABAR CHIQSIN
-                    await send_video_caption(update, context)
+                    keyboard = [
+                        [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+                    ]
+                    await update.message.reply_text(
+                        "Quyidagi tugmalardan foydalaning:",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
             
             return  # Video ko'rsatilgandan keyin start xabarini ko'rsatmaslik
 
@@ -583,38 +442,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partners_message = "🤝 Hamkorlarimiz:\n" + "\n".join([text[0] for text in partners_texts])
         await update.message.reply_text(partners_message)
 
-    if user_id == OWNER_ID or is_admin(user_id):
+    if user_id == OWNER_ID:
         # Foydalanuvchilar sonini hisoblash
         user_count = fetch_one("SELECT COUNT(*) FROM users")[0]
         
         keyboard = [
             [InlineKeyboardButton("📤 Video yuklash", callback_data="upload_video")],
             [InlineKeyboardButton("🔍 Video qidirish", callback_data="search_video")],
+            [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
+            [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="add_channel")],
+            [InlineKeyboardButton("🗑 Kanalni o'chirish", callback_data="delete_channel")],
+            [InlineKeyboardButton("📋 Kanallar ro'yxati", callback_data="list_channels")],
+            [InlineKeyboardButton("📝 Qo'shimcha matn", callback_data="manage_text")],
+            [InlineKeyboardButton("🤝 Hamkorlar", callback_data="manage_partners")],
+            [InlineKeyboardButton("🎫 Reklama sozlamalari", callback_data="ad_settings")],
+            [InlineKeyboardButton("👤 Premium boshqarish", callback_data="premium_management")],
+            [InlineKeyboardButton(f"👥 Foydalanuvchilar: {user_count}", callback_data="user_count")],
         ]
         
-        # Faqat owner uchun admin funksiyalari
-        if user_id == OWNER_ID:
-            keyboard.extend([
-                [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
-                [InlineKeyboardButton("➕ Kanal qo'shish", callback_data="add_channel")],
-                [InlineKeyboardButton("🗑 Kanalni o'chirish", callback_data="delete_channel")],
-                [InlineKeyboardButton("📋 Kanallar ro'yxati", callback_data="list_channels")],
-                [InlineKeyboardButton("📝 Qo'shimcha matn", callback_data="manage_text")],
-                [InlineKeyboardButton("🤝 Hamkorlar", callback_data="manage_partners")],
-                [InlineKeyboardButton("🎫 Reklama sozlamalari", callback_data="ad_settings")],
-                [InlineKeyboardButton("👤 Premium boshqarish", callback_data="premium_management")],
-                [InlineKeyboardButton("👥 Admin boshqarish", callback_data="admin_management")],
-                [InlineKeyboardButton("📝 Video ostidagi xabar", callback_data="video_caption_manage")],
-                [InlineKeyboardButton("🔘 Video ostidagi tugma", callback_data="video_button_manage")],
-                [InlineKeyboardButton("🔗 Majburiy kanal linki", callback_data="channel_link_manage")],
-            ])
-        
-        keyboard.append([InlineKeyboardButton(f"👥 Foydalanuvchilar: {user_count}", callback_data="user_count")])
-        
-        if user_id == OWNER_ID:
-            await update.message.reply_text("Salom Owner! Tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            await update.message.reply_text("Salom Admin! Tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("Salom Owner! Tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         if is_premium:
             await update.message.reply_text("🎉 Siz premium foydalanuvchisiz! Kanallarga obuna bo'lish shart emas.\n\nKino kodi yoki Instagram linkini kiriting:")
@@ -631,6 +477,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
     except Exception as e:
         print(f"Callback query error: {e}")
+        return
+
+    # ---------- DO'STLARGA YUBORISH TUGMASI ----------
+    if data == "share_friend":
+        await start_share_friend(update, context)
         return
 
     # ---------- REKLAMA BYPASS TUGMASI ----------
@@ -660,34 +511,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ---------- DO'STLARGA YUBORISH TUGMASI ----------
-    elif data == "share_friend":
-        await start_share_friend(update, context)
-        return
-
-    # ---------- ORQAGA TUGMASI ----------
-    elif data == "back_to_video":
-        # Orqaga qaytish logikasi
-        last_code = context.user_data.get("last_video_code")
-        if last_code:
-            # Video qayta yuborish
-            result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
-            if result:
-                file_id, extra_text = result
-                if last_code.startswith('http'):
-                    caption_text = f"Link: {last_code}\n{extra_text}\n{BOT_USERNAME}"
-                else:
-                    caption_text = f"Kod: {last_code}\n{extra_text}\n{BOT_USERNAME}"
-                
-                await query.message.reply_video(file_id, caption=caption_text)
-                
-                # Tugmalarni qayta chiqarish
-                await send_callback_buttons(query, context)
-                
-                # Xabarni qayta chiqarish
-                await send_callback_caption(query, context)
-        return
-
     # ---------- FOYDALANUVCHI OBUNA TEKSHIRISH ----------
     if data.startswith("check_subs_"):
         short_code = data.replace("check_subs_", "")
@@ -711,10 +534,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["last_video_code"] = code
                 
                 # ✅ HAR DOIM TUGMALAR CHIQSIN
-                await send_callback_buttons(query, context)
-                
-                # ✅ HAR DOIM XABAR CHIQSIN
-                await send_callback_caption(query, context)
+                keyboard = [
+                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+                ]
+                await query.message.reply_text(
+                    "Quyidagi tugmalardan foydalaning:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
             return
 
         # Oddiy foydalanuvchi uchun obuna tekshirish
@@ -741,12 +567,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for ch in not_subscribed:
                 keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
             
-            # YANGI: Kanal linkini qo'shish
-            link_result = fetch_one("SELECT link_text, link_url FROM channel_links ORDER BY id DESC LIMIT 1")
-            if link_result:
-                link_text, link_url = link_result
-                keyboard.append([InlineKeyboardButton(link_text, url=link_url)])
-            
             safe_code = create_safe_callback_data(code)
             keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
             keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
@@ -767,14 +587,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["last_video_code"] = code
             
             # ✅ HAR DOIM TUGMALAR CHIQSIN
-            await send_callback_buttons(query, context)
-            
-            # ✅ HAR DOIM XABAR CHIQSIN
-            await send_callback_caption(query, context)
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await query.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         return
 
     # ---------- OWNER TUGMALARI ----------
-    if user_id != OWNER_ID and not is_admin(user_id):
+    if user_id != OWNER_ID:
         return
 
     if data == "upload_video":
@@ -790,27 +613,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "broadcast":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "broadcast"
         await query.message.reply_text("Broadcast xabar yuboring (matn, rasm, video yoki boshqa media bilan):")
         return
 
     elif data == "add_channel":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "add_channel"
         await query.message.reply_text("Kanal nomini yozing (masalan @kanal_nomi):")
         return
 
     elif data == "delete_channel":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "delete_channel"
         await query.message.reply_text("O'chiriladigan kanal nomini yozing:")
@@ -922,9 +736,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- YANGI OWNER TUGMALARI ----------
     elif data == "ad_settings":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         keyboard = [
             [InlineKeyboardButton("✏️ Reklama matnini o'zgartirish", callback_data="edit_ad_text")],
             [InlineKeyboardButton("🔍 Joriy reklama matni", callback_data="view_ad_text")],
@@ -937,18 +748,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "edit_ad_text":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "edit_ad_text"
         await query.message.reply_text("Yangi reklama matnini kiriting:")
         return
 
     elif data == "view_ad_text":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         ad_result = fetch_one("SELECT text FROM ad_texts ORDER BY id DESC LIMIT 1")
         if ad_result:
             await query.message.reply_text(f"Joriy reklama matni:\n\n{ad_result[0]}")
@@ -957,9 +762,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "view_requests":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         requests = fetch_all("""
             SELECT br.user_id, br.request_text, br.request_date, u.user_id 
             FROM bypass_requests br 
@@ -984,9 +786,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "manage_requests":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "manage_requests"
         requests = fetch_all("SELECT user_id FROM bypass_requests WHERE status = 'pending'")
@@ -1003,9 +802,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "premium_management":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         keyboard = [
             [InlineKeyboardButton("👤 Userga premium berish", callback_data="give_premium")],
             [InlineKeyboardButton("📋 Premium foydalanuvchilar", callback_data="list_premium")],
@@ -1018,18 +814,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "give_premium":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "give_premium_user"
         await query.message.reply_text("Premium beriladigan user ID ni kiriting:")
         return
 
     elif data == "list_premium":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         premium_users = fetch_all("SELECT pu.user_id, pu.expiry_date FROM premium_users pu WHERE pu.expiry_date > CURRENT_TIMESTAMP")
         
         if not premium_users:
@@ -1039,12 +829,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🎫 Premium foydalanuvchilar:\n\n"
         for i, user in enumerate(premium_users, 1):
             user_id, expiry_date = user
-            # PostgreSQL dan datetime obyekt qaytadi
             if isinstance(expiry_date, datetime):
                 days_left = (expiry_date - datetime.now()).days
                 expiry_str = expiry_date.strftime('%Y-%m-%d %H:%M')
             else:
-                # SQLite uchun
                 expiry_dt = datetime.fromisoformat(expiry_date)
                 days_left = (expiry_dt - datetime.now()).days
                 expiry_str = expiry_date
@@ -1055,186 +843,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "remove_premium":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
         context.user_data.clear()
         context.user_data["action"] = "remove_premium_user"
         await query.message.reply_text("Premium olib tashlanadigan user ID ni kiriting:")
         return
 
-    # ---------- YANGI ADMIN BOSHQARISH TUGMALARI ----------
-    elif data == "admin_management":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
-        keyboard = [
-            [InlineKeyboardButton("➕ Admin qo'shish", callback_data="add_admin")],
-            [InlineKeyboardButton("🔍 Adminlar ro'yxati", callback_data="list_admins")],
-            [InlineKeyboardButton("🗑 Adminni o'chirish", callback_data="remove_admin")]
-        ]
-        await query.message.reply_text(
-            "Adminlarni boshqarish:", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    elif data == "add_admin":
-        if user_id != OWNER_ID:
-            return
-        context.user_data.clear()
-        context.user_data["action"] = "add_admin"
-        await query.message.reply_text("Admin qo'shiladigan user ID ni kiriting:")
-        return
-
-    elif data == "list_admins":
-        if user_id != OWNER_ID:
-            return
-        admins = fetch_all("SELECT user_id, added_date FROM admins ORDER BY added_date")
-        text = "👥 Adminlar ro'yxati:\n\n"
-        text += f"1. User ID: {OWNER_ID} (Owner)\n"
-        for i, admin in enumerate(admins, 2):
-            admin_id, added_date = admin
-            text += f"{i}. User ID: {admin_id}\n   Qo'shilgan: {added_date}\n"
-        await query.message.reply_text(text)
-        return
-
-    elif data == "remove_admin":
-        if user_id != OWNER_ID:
-            return
-        context.user_data.clear()
-        context.user_data["action"] = "remove_admin"
-        await query.message.reply_text("O'chiriladigan admin ID ni kiriting:")
-        return
-
-    # ---------- YANGI VIDEO CAPTION TUGMALARI ----------
-    elif data == "video_caption_manage":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
-        keyboard = [
-            [InlineKeyboardButton("➕ Xabar qo'shish", callback_data="add_video_caption")],
-            [InlineKeyboardButton("🔍 Xabarni ko'rish", callback_data="view_video_caption")],
-            [InlineKeyboardButton("🗑 Xabarni o'chirish", callback_data="delete_video_caption")]
-        ]
-        await query.message.reply_text(
-            "Video ostidagi xabarni boshqarish:", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    elif data == "add_video_caption":
-        if user_id != OWNER_ID:
-            return
-        context.user_data.clear()
-        context.user_data["action"] = "add_video_caption"
-        await query.message.reply_text("Video dan keyin chiqadigan xabarni yozing:")
-        return
-
-    elif data == "view_video_caption":
-        if user_id != OWNER_ID:
-            return
-        result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
-        if result:
-            await query.message.reply_text(f"Joriy video xabari:\n\n{result[0]}")
-        else:
-            await query.message.reply_text("Hali video xabari qo'shilmagan.")
-        return
-
-    elif data == "delete_video_caption":
-        if user_id != OWNER_ID:
-            return
-        execute_query("DELETE FROM video_captions")
-        await query.message.reply_text("✅ Video xabari o'chirildi!")
-        return
-
-    # ---------- YANGI VIDEO BUTTON TUGMALARI ----------
-    elif data == "video_button_manage":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
-        keyboard = [
-            [InlineKeyboardButton("➕ Tugma qo'shish", callback_data="add_video_button")],
-            [InlineKeyboardButton("🔍 Tugmani ko'rish", callback_data="view_video_button")],
-            [InlineKeyboardButton("🗑 Tugmani o'chirish", callback_data="delete_video_button")]
-        ]
-        await query.message.reply_text(
-            "Video ostidagi tugmani boshqarish:", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    elif data == "add_video_button":
-        if user_id != OWNER_ID:
-            return
-        context.user_data.clear()
-        context.user_data["action"] = "add_video_button_text"
-        await query.message.reply_text("Tugma matnini yozing (masalan: 📺 Bizning kanal):")
-        return
-
-    elif data == "view_video_button":
-        if user_id != OWNER_ID:
-            return
-        result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
-        if result:
-            button_text, button_url = result
-            await query.message.reply_text(f"Joriy video tugmasi:\nMatn: {button_text}\nLink: {button_url}")
-        else:
-            await query.message.reply_text("Hali video tugmasi qo'shilmagan.")
-        return
-
-    elif data == "delete_video_button":
-        if user_id != OWNER_ID:
-            return
-        execute_query("DELETE FROM video_buttons")
-        await query.message.reply_text("✅ Video tugmasi o'chirildi! Endi video ostida tugma chiqmaydi.")
-        return
-
-    # ---------- YANGI CHANNEL LINK TUGMALARI ----------
-    elif data == "channel_link_manage":
-        if user_id != OWNER_ID:
-            await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-            return
-        keyboard = [
-            [InlineKeyboardButton("➕ Link qo'shish", callback_data="add_channel_link")],
-            [InlineKeyboardButton("🔍 Linkni ko'rish", callback_data="view_channel_link")],
-            [InlineKeyboardButton("🗑 Linkni o'chirish", callback_data="delete_channel_link")]
-        ]
-        await query.message.reply_text(
-            "Majburiy kanal linkini boshqarish:", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        return
-
-    elif data == "add_channel_link":
-        if user_id != OWNER_ID:
-            return
-        context.user_data.clear()
-        context.user_data["action"] = "add_channel_link_text"
-        await query.message.reply_text("Link tugmasi matnini yozing (masalan: 🔗 Bizning sayt):")
-        return
-
-    elif data == "view_channel_link":
-        if user_id != OWNER_ID:
-            return
-        result = fetch_one("SELECT link_text, link_url FROM channel_links ORDER BY id DESC LIMIT 1")
-        if result:
-            link_text, link_url = result
-            await query.message.reply_text(f"Joriy kanal linki:\nMatn: {link_text}\nLink: {link_url}")
-        else:
-            await query.message.reply_text("Hali kanal linki qo'shilmagan.")
-        return
-
-    elif data == "delete_channel_link":
-        if user_id != OWNER_ID:
-            return
-        execute_query("DELETE FROM channel_links")
-        await query.message.reply_text("✅ Kanal linki o'chirildi!")
-        return
-
 # ---------- OWNER VIDEO HANDLER ----------
 async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != OWNER_ID and not is_admin(update.message.from_user.id):
+    if update.message.from_user.id != OWNER_ID:
         return
     if not update.message.video:
         return
@@ -1250,7 +866,7 @@ async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     # BOSHQA HOLATLAR: Yangi video yuklash yoki action yo'q
-    context.user_data.clear()  # Avvalgi ma'lumotlarni tozalash
+    context.user_data.clear()
     context.user_data["video_file_id"] = update.message.video.file_id
     context.user_data["action"] = "set_code"
     await update.message.reply_text("Video qabul qilindi! Endi video uchun kod yoki Instagram linkini yozing:")
@@ -1258,7 +874,7 @@ async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ---------- OWNER PHOTO HANDLER ----------
 async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != OWNER_ID and not is_admin(update.message.from_user.id):
+    if update.message.from_user.id != OWNER_ID:
         return
     
     action = context.user_data.get("action")
@@ -1274,7 +890,7 @@ async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     
-    if user_id == OWNER_ID or is_admin(user_id):
+    if user_id == OWNER_ID:
         await handle_owner_photo(update, context)
         return
     
@@ -1320,7 +936,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get("action")
 
     # ---------- OWNER ACTIONS ----------
-    if user_id == OWNER_ID or is_admin(user_id):
+    if user_id == OWNER_ID:
         # Video kodi qo'shish (har qanday matn: asd123 yoki Instagram link)
         if action == "set_code":
             file_id = context.user_data.get("video_file_id")
@@ -1386,9 +1002,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Kanal qo'shish
         if action == "add_channel":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             if DATABASE_URL:
                 execute_query("INSERT INTO channels (channel) VALUES (%s) ON CONFLICT (channel) DO NOTHING", (text,))
             else:
@@ -1399,9 +1012,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Kanal o'chirish
         if action == "delete_channel":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             execute_query("DELETE FROM channels WHERE channel=%s" if DATABASE_URL else "DELETE FROM channels WHERE channel=?", (text,))
             await update.message.reply_text(f"Kanal o'chirildi: {text}")
             context.user_data.clear()
@@ -1409,9 +1019,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Broadcast tasdiqlash
         if action == "confirm_broadcast":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             if text.upper() == "HA":
                 users = fetch_all("SELECT user_id FROM users")
                 count = 0
@@ -1443,9 +1050,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Oddiy broadcast (faqat matn)
         if action == "broadcast" and not context.user_data.get("broadcast_photo") and not context.user_data.get("broadcast_video"):
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             users = fetch_all("SELECT user_id FROM users")
             count = 0
             failed = 0
@@ -1528,9 +1132,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Reklama matnini o'zgartirish
         if action == "edit_ad_text":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             execute_query("INSERT INTO ad_texts (text) VALUES (%s)" if DATABASE_URL else "INSERT INTO ad_texts (text) VALUES (?)", (text,))
             await update.message.reply_text("✅ Reklama matni yangilandi!")
             context.user_data.clear()
@@ -1538,9 +1139,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # So'rovlarni boshqarish
         elif action == "manage_requests":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             try:
                 target_user_id = int(text)
                 existing = fetch_one("SELECT * FROM bypass_requests WHERE user_id=%s" if DATABASE_URL else "SELECT * FROM bypass_requests WHERE user_id=?", (target_user_id,))
@@ -1556,9 +1154,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Premium kunlarini belgilash
         elif action == "set_premium_days":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             try:
                 days = int(text)
                 target_user_id = context.user_data.get("target_user")
@@ -1607,9 +1202,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Userga premium berish
         elif action == "give_premium_user":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             try:
                 target_user_id = int(text)
                 context.user_data["action"] = "set_premium_days_direct"
@@ -1621,9 +1213,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # To'g'ridan-to'g'ri premium kunlarini belgilash
         elif action == "set_premium_days_direct":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             try:
                 days = int(text)
                 target_user_id = context.user_data.get("target_user")
@@ -1659,100 +1248,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Premiumni olib tashlash
         elif action == "remove_premium_user":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
             try:
                 target_user_id = int(text)
                 execute_query("DELETE FROM premium_users WHERE user_id=%s" if DATABASE_URL else "DELETE FROM premium_users WHERE user_id=?", (target_user_id,))
                 await update.message.reply_text(f"✅ User {target_user_id} ning premiumi olib tashlandi!")
             except ValueError:
                 await update.message.reply_text("Iltimos, to'g'ri user ID kiriting.")
-            context.user_data.clear()
-            return
-
-        # YANGI: Admin qo'shish
-        elif action == "add_admin":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            try:
-                admin_id = int(text)
-                if DATABASE_URL:
-                    execute_query("INSERT INTO admins (user_id, added_by) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING", (admin_id, user_id))
-                else:
-                    execute_query("INSERT OR IGNORE INTO admins (user_id, added_by) VALUES (?, ?)", (admin_id, user_id))
-                await update.message.reply_text(f"✅ User {admin_id} admin qilindi!")
-            except ValueError:
-                await update.message.reply_text("❌ Iltimos, to'g'ri user ID kiriting!")
-            context.user_data.clear()
-            return
-
-        # YANGI: Adminni o'chirish
-        elif action == "remove_admin":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            try:
-                admin_id = int(text)
-                execute_query("DELETE FROM admins WHERE user_id=%s" if DATABASE_URL else "DELETE FROM admins WHERE user_id=?", (admin_id,))
-                await update.message.reply_text(f"✅ Admin {admin_id} o'chirildi!")
-            except ValueError:
-                await update.message.reply_text("❌ Iltimos, to'g'ri user ID kiriting!")
-            context.user_data.clear()
-            return
-
-        # YANGI: Video caption qo'shish
-        elif action == "add_video_caption":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            execute_query("INSERT INTO video_captions (caption_text) VALUES (%s)" if DATABASE_URL else "INSERT INTO video_captions (caption_text) VALUES (?)", (text,))
-            await update.message.reply_text("✅ Video xabari saqlandi! Endi barcha videolardan keyin bu xabar chiqadi.")
-            context.user_data.clear()
-            return
-
-        # YANGI: Video button matnini qo'shish
-        elif action == "add_video_button_text":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            context.user_data["button_text"] = text
-            context.user_data["action"] = "add_video_button_url"
-            await update.message.reply_text("Endi tugma linkini yozing:")
-            return
-
-        # YANGI: Video button linkini qo'shish
-        elif action == "add_video_button_url":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            button_text = context.user_data.get("button_text")
-            if button_text:
-                execute_query("INSERT INTO video_buttons (button_text, button_url) VALUES (%s, %s)" if DATABASE_URL else "INSERT INTO video_buttons (button_text, button_url) VALUES (?, ?)", (button_text, text))
-                await update.message.reply_text(f"✅ Video tugmasi saqlandi!\nMatn: {button_text}\nLink: {text}")
-            context.user_data.clear()
-            return
-
-        # YANGI: Channel link matnini qo'shish
-        elif action == "add_channel_link_text":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            context.user_data["link_text"] = text
-            context.user_data["action"] = "add_channel_link_url"
-            await update.message.reply_text("Endi link manzilini yozing:")
-            return
-
-        # YANGI: Channel link URL ni qo'shish
-        elif action == "add_channel_link_url":
-            if user_id != OWNER_ID:
-                await update.message.reply_text("❌ Bu funksiya faqat owner uchun!")
-                return
-            link_text = context.user_data.get("link_text")
-            if link_text:
-                execute_query("INSERT INTO channel_links (link_text, link_url) VALUES (%s, %s)" if DATABASE_URL else "INSERT INTO channel_links (link_text, link_url) VALUES (?, ?)", (link_text, text))
-                await update.message.reply_text(f"✅ Kanal linki saqlandi!\nMatn: {link_text}\nLink: {text}")
             context.user_data.clear()
             return
 
@@ -1777,10 +1278,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_video(file_id, caption=caption_text)
             
             # ✅ HAR DOIM TUGMALAR CHIQSIN
-            await send_video_buttons(update, context)
-            
-            # ✅ HAR DOIM XABAR CHIQSIN
-            await send_video_caption(update, context)
+            keyboard = [
+                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+            ]
+            await update.message.reply_text(
+                "Quyidagi tugmalardan foydalaning:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
             
         else:
             channels = fetch_all("SELECT channel FROM channels")
@@ -1797,12 +1301,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = []
                 for ch in not_subscribed:
                     keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
-                
-                # Kanal linkini qo'shish
-                link_result = fetch_one("SELECT link_text, link_url FROM channel_links ORDER BY id DESC LIMIT 1")
-                if link_result:
-                    link_text, link_url = link_result
-                    keyboard.append([InlineKeyboardButton(link_text, url=link_url)])
                 
                 safe_code = create_safe_callback_data(text)
                 keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
@@ -1822,10 +1320,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_video(file_id, caption=caption_text)
                 
                 # ✅ HAR DOIM TUGMALAR CHIQSIN
-                await send_video_buttons(update, context)
-                
-                # ✅ HAR DOIM XABAR CHIQSIN
-                await send_video_caption(update, context)
+                keyboard = [
+                    [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
+                ]
+                await update.message.reply_text(
+                    "Quyidagi tugmalardan foydalaning:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
     else:
         # Agar video topilmasa
         await update.message.reply_text("Bunday kod/linkka film topilmadi! Iltimos, to'g'ri kod yoki linkni yuboring.")
