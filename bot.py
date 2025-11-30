@@ -325,6 +325,16 @@ async def send_video_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         print(f"Tugma yuborishda xatolik: {e}")
 
+async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Video xabarini yuborish"""
+    try:
+        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        
+        if caption_result:
+            await update.message.reply_text(caption_result[0])
+    except Exception as e:
+        print(f"Xabar yuborishda xatolik: {e}")
+
 # ---------- CALLBACK UCHUN YANGI FUNKSIYALAR ----------
 async def send_callback_buttons(query, context: ContextTypes.DEFAULT_TYPE):
     """Callback uchun video tugmalarini yuborish"""
@@ -361,6 +371,16 @@ async def send_callback_buttons(query, context: ContextTypes.DEFAULT_TYPE):
             )
     except Exception as e:
         print(f"Callback tugma yuborishda xatolik: {e}")
+
+async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE):
+    """Callback uchun video xabarini yuborish"""
+    try:
+        caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
+        
+        if caption_result:
+            await query.message.reply_text(caption_result[0])
+    except Exception as e:
+        print(f"Callback xabar yuborishda xatolik: {e}")
 
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
