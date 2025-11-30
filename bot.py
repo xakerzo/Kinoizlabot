@@ -989,14 +989,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ---------- YANGI VIDEO BUTTON TUGMALARI ----------
-    elif data == "video_button_manage":
+elif data == "video_button_manage":
     if user_id != OWNER_ID:
         await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
         return
     keyboard = [
-        [InlineKeyboardButton("➕ Tugma qo'shish", callback_data="add_video_btn")],
-        [InlineKeyboardButton("🔍 Tugmani ko'rish", callback_data="view_video_btn")],
-        [InlineKeyboardButton("🗑 Tugmani o'chirish", callback_data="remove_video_btn")]
+        [InlineKeyboardButton("➕ Tugma qo'shish", callback_data="add_video_button")],
+        [InlineKeyboardButton("🔍 Tugmani ko'rish", callback_data="view_video_button")],
+        [InlineKeyboardButton("🗑 Tugmani o'chirish", callback_data="delete_video_button")]
     ]
     await query.message.reply_text(
         "Video ostidagi tugmani boshqarish:", 
@@ -1004,7 +1004,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return
 
-elif data == "add_video_btn":
+elif data == "add_video_button":
     if user_id != OWNER_ID:
         return
     context.user_data.clear()
@@ -1012,7 +1012,7 @@ elif data == "add_video_btn":
     await query.message.reply_text("Tugma matnini yozing (masalan: 📺 Bizning kanal):")
     return
 
-elif data == "view_video_btn":
+elif data == "view_video_button":
     if user_id != OWNER_ID:
         return
     result = fetch_one("SELECT button_text, button_url FROM video_buttons ORDER BY id DESC LIMIT 1")
@@ -1023,13 +1023,10 @@ elif data == "view_video_btn":
         await query.message.reply_text("Hali video tugmasi qo'shilmagan.")
     return
 
-elif data == "remove_video_btn":
+elif data == "delete_video_button":
     if user_id != OWNER_ID:
         return
-    
-    # Video tugmasini o'chirish
     execute_query("DELETE FROM video_buttons")
-    
     await query.message.reply_text("✅ Video tugmasi o'chirildi! Endi video ostida tugma chiqmaydi.")
     return
 
