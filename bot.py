@@ -1016,8 +1016,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("✅ Kanal linki o'chirildi!")
         return
 
-   # ---------- DO'STLARGA YUBORISH TUGMASI ----------
-elif data == "share_friend":
+# ---------- DO'STLARGA YUBORISH TUGMASI ----------
+if data == "share_friend":  # elif ni if ga o'zgartirdim
     # Userning oxirgi ko'rgan video kodini olish
     last_code = context.user_data.get("last_video_code")
     if last_code:
