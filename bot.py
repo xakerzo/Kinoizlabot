@@ -988,7 +988,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("✅ Video xabari o'chirildi!")
         return
 
-    # ---------- YANGI VIDEO BUTTON TUGMALARI ----------
+# ---------- YANGI VIDEO BUTTON TUGMALARI ----------
 elif data == "video_button_manage":
     if user_id != OWNER_ID:
         await query.message.reply_text("❌ Bu funksiya faqat owner uchun!")
