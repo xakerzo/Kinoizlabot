@@ -6,12 +6,33 @@ import psycopg2
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 import hashlib
+import re  # YANGI: re kutubxonasini qo'shdik
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = 1373647
 BOT_TOKEN = os.environ.get('BOT_TOKEN', "8505113284:AAFu0vhU6j7d4tsaY5Rsn1qga57THZt3pEo")
 BOT_USERNAME = "@kinoni_izlabot"
 BOT_LINK = "https://t.me/kinoni_izlabot"
+
+# ---------- YANGI FUNKSIYA: INSTAGRAM LINKINI TOZALASH ----------
+def clean_instagram_url(url):
+    """Instagram linkini to'g'ri shaklga keltirish (faqat https://www.instagram.com/reel/DSC2WShjK7a qismi)"""
+    # Agar Instagram linki bo'lmasa, o'zini qaytar
+    if 'instagram.com' not in url.lower():
+        return url
+    
+    # Pattern: https://www.instagram.com/reel/DSC2WShjK7a
+    pattern = r'(https?://(?:www\.)?instagram\.com/(?:reel|p|tv)/[A-Za-z0-9_-]+)'
+    
+    match = re.search(pattern, url)
+    if match:
+        clean_url = match.group(1)
+        # Oxiridagi / ni olib tashlash (agar bo'lsa)
+        if clean_url.endswith('/'):
+            clean_url = clean_url[:-1]
+        return clean_url
+    
+    return url
 
 # ---------- DATABASE ----------
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -1039,6 +1060,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.clear()
                 return
             
+            # YANGI: Instagram linkini tozalash
+            original_text = text
+            if 'instagram.com' in text.lower():
+                text = clean_instagram_url(text)
+                print(f"Owner tozalangan link: {text} (asl: {original_text})")
+            
             # Kod bandligini tekshirish (har qanday matn uchun)
             existing = fetch_one("SELECT * FROM films WHERE code=%s" if DATABASE_URL else "SELECT * FROM films WHERE code=?", (text,))
             if existing:
@@ -1074,6 +1101,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Video kodi qidirish
         if action == "search_video":
+            # YANGI: Instagram linkini tozalash
+            original_text = text
+            if 'instagram.com' in text.lower():
+                text = clean_instagram_url(text)
+                print(f"Owner search tozalangan link: {text} (asl: {original_text})")
+            
             result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (text,))
             if result:
                 file_id, extra_text = result
@@ -1175,6 +1208,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == "update_code":
             new_code = text
             old_code = context.user_data.get("old_code")
+            
+            # YANGI: Yangi kod Instagram link bo'lsa, tozalash
+            if 'instagram.com' in new_code.lower():
+                new_code = clean_instagram_url(new_code)
+                print(f"Owner update tozalangan link: {new_code}")
             
             existing = fetch_one("SELECT * FROM films WHERE code=%s AND code != %s" if DATABASE_URL else "SELECT * FROM films WHERE code=? AND code!=?", (new_code, old_code))
             if existing:
@@ -1352,6 +1390,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # ---------- FOYDALANUVCHI KINO KO'RISH ----------
+    # YANGI: User Instagram link yuborsa, tozalash
+    original_user_text = text
+    if 'instagram.com' in text.lower():
+        text = clean_instagram_url(text)
+        print(f"User tozalangan link: {text} (asl: {original_user_text})")
+    
     # User har qanday matn yuborsa (asd123 yoki Instagram link), video qidirish
     result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (text,))
     if result:
@@ -1365,7 +1409,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_premium:
             # Agar link bo'lsa, caption ni boshqacha ko'rsatish
             if text.startswith('http'):
-                caption_text = f"Link: {text}\n{extra_text}\n{BOT_USERNAME}"
+                # Asl linkni ko'rsatish
+                caption_text = f"Link: {original_user_text}\n{extra_text}\n{BOT_USERNAME}"
             else:
                 caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
             
@@ -1401,7 +1446,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 # Agar link bo'lsa, caption ni boshqacha ko'rsatish
                 if text.startswith('http'):
-                    caption_text = f"Link: {text}\n{extra_text}\n{BOT_USERNAME}"
+                    # Asl linkni ko'rsatish
+                    caption_text = f"Link: {original_user_text}\n{extra_text}\n{BOT_USERNAME}"
                 else:
                     caption_text = f"Kod: {text}\n{extra_text}\n{BOT_USERNAME}"
                 
