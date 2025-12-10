@@ -434,7 +434,7 @@ def get_video_stats(code):
         return result[0]
     return 0
 
-# ---------- VIDEO CAPTION FUNKSIYALARI ----------
+# ---------- FUNKSIYALAR ----------
 def get_caption_text():
     """Caption matnini olish (videolarga qo'shimcha matn)"""
     result = fetch_one("SELECT text FROM caption_texts ORDER BY id DESC LIMIT 1")
@@ -449,6 +449,11 @@ def get_ad_text():
         return result[0]
     return ""
 
+def get_premium_text():
+    """Premium matnini olish"""
+    result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
+    return result
+
 # ---------- VIDEO OSTIDAGI MATN FUNKSIYALARI ----------
 async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE, video_code=None):
     """Video dan keyin matn yuborish"""
@@ -462,18 +467,11 @@ async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE,
         # Video caption matnini olish
         caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
         
-        # Caption text (videolarga qo'shimcha matn)
-        caption_text = get_caption_text()
-        
         # Bot nomini qo'shish
         bot_info = f"\n\n🤖 {BOT_USERNAME}"
         
         if caption_result:
             full_text = f"{caption_result[0]}{bot_info}"
-            
-            # Agar caption text mavjud bo'lsa, qo'shamiz
-            if caption_text:
-                full_text += f"\n\n{caption_text}"
             
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
@@ -484,10 +482,6 @@ async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE,
             )
         else:
             full_text = f"Quyidagi tugmalardan foydalaning:{bot_info}"
-            
-            # Agar caption text mavjud bo'lsa, qo'shamiz
-            if caption_text:
-                full_text += f"\n\n{caption_text}"
             
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
@@ -511,18 +505,11 @@ async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE, video
         # Video caption matnini olish
         caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
         
-        # Caption text (videolarga qo'shimcha matn)
-        caption_text = get_caption_text()
-        
         # Bot nomini qo'shish
         bot_info = f"\n\n🤖 {BOT_USERNAME}"
         
         if caption_result:
             full_text = f"{caption_result[0]}{bot_info}"
-            
-            # Agar caption text mavjud bo'lsa, qo'shamiz
-            if caption_text:
-                full_text += f"\n\n{caption_text}"
             
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
@@ -533,10 +520,6 @@ async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE, video
             )
         else:
             full_text = f"Quyidagi tugmalardan foydalaning:{bot_info}"
-            
-            # Agar caption text mavjud bo'lsa, qo'shamiz
-            if caption_text:
-                full_text += f"\n\n{caption_text}"
             
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
@@ -574,127 +557,6 @@ def get_original_code_from_callback(short_code):
                 return original_code
     
     return short_code
-
-# ---------- DO'STLARGA YUBORISH FUNKSIYALARI ----------
-async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Do'stlarga yuborishni boshlash"""
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    last_code = context.user_data.get("last_video_code")
-    if not last_code:
-        await query.answer("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.", show_alert=True)
-        return
-    
-    result = fetch_one("SELECT file_id FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id FROM films WHERE code=?", (last_code,))
-    if not result:
-        await query.answer("❌ Video topilmadi.", show_alert=True)
-        return
-    
-    await query.message.reply_text(
-        f"🎬 Video ulashish\n\n"
-        f"📹 Video: {last_code}\n\n"
-        f"Do'stlaringizga video yuborish uchun quyidagi tugmani bosing:"
-    )
-    
-    await query.message.reply_text(
-        "📤 Do'stingizga video yuborish uchun quyidagi tugmani bosing:",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("📤 Do'stlarga yuborish", switch_inline_query="")
-        ]])
-    )
-
-async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inline query handler - do'stlarga yuborish"""
-    query = update.inline_query
-    user_id = query.from_user.id
-    
-    last_code = context.user_data.get("last_video_code")
-    if not last_code:
-        films = fetch_all("SELECT code FROM films ORDER BY code LIMIT 10")
-        if not films:
-            return
-        
-        results = []
-        for film in films:
-            video_code = film[0]
-            
-            share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
-            if video_code.startswith('http'):
-                share_text += f"🔗 Link: {video_code}\n"
-            else:
-                share_text += f"📹 Video kod: {video_code}\n"
-            share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
-            share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
-            
-            keyboard = [
-                [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(video_code)}")]
-            ]
-            
-            results.append(
-                InlineQueryResultArticle(
-                    id=hashlib.md5(video_code.encode()).hexdigest()[:64],
-                    title=f"📹 Video: {video_code[:30]}{'...' if len(video_code) > 30 else ''}",
-                    description=f"Do'stingizga video yuboring - {video_code}",
-                    input_message_content=InputTextMessageContent(
-                        message_text=share_text
-                    ),
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-            )
-        
-        await query.answer(results)
-        return
-    
-    result = fetch_one("SELECT file_id FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id FROM films WHERE code=?", (last_code,))
-    if not result:
-        return
-    
-    share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
-    if last_code.startswith('http'):
-        share_text += f"🔗 Link: {last_code}\n"
-    else:
-        share_text += f"📹 Video kod: {last_code}\n"
-    share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
-    share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
-    
-    keyboard = [
-        [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(last_code)}")]
-    ]
-    
-    results = [
-        InlineQueryResultArticle(
-            id=hashlib.md5(last_code.encode()).hexdigest()[:64],
-            title="📤 Do'stingizga video yuboring",
-            description=f"Video: {last_code}",
-            input_message_content=InputTextMessageContent(
-                message_text=share_text
-            ),
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    ]
-    
-    await query.answer(results)
-
-async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tanlangan inline result - do'stga yuborilganda"""
-    chosen_result = update.chosen_inline_result
-    user_id = chosen_result.from_user.id
-    result_id = chosen_result.result_id
-    
-    last_code = context.user_data.get("last_video_code")
-    if last_code:
-        context.user_data.setdefault("shared_count", 0)
-        context.user_data["shared_count"] += 1
-        
-        try:
-            await context.bot.send_message(
-                user_id,
-                f"✅ Video {last_code} do'stingizga yuborildi!\n"
-                f"Jami yuborilgan do'stlar: {context.user_data['shared_count']}"
-            )
-        except:
-            pass
 
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -735,17 +597,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await send_video_caption(update, context)
                 return
             else:
-                premium_text_result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
-                if premium_text_result:
-                    premium_text, photo_id, caption = premium_text_result
-                    if photo_id:
-                        await update.message.reply_photo(photo_id, caption=caption)
-                    elif premium_text:
-                        await update.message.reply_text(premium_text)
-                
+                # Premium obuna tugmasi bilan xabar
+                keyboard = [
+                    [InlineKeyboardButton("🎫 PREMIUM OBUNA", callback_data="bypass_ads")]
+                ]
                 await update.message.reply_text(
                     "❗ Bu video faqat premium foydalanuvchilar uchun!\n"
-                    "Premium olish uchun admin bilan bog'laning."
+                    "Premium olish uchun pastdagi tugmani bosing:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 return
         
@@ -810,17 +669,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Start xabarini olish
     start_result = fetch_one("SELECT message_text FROM start_messages ORDER BY id DESC LIMIT 1")
     
+    if start_result:
+        start_message = start_result[0]
+    else:
+        # Agar start xabari bo'lmasa, default xabar
+        start_message = "Salom! Kino kodi yoki Instagram linkini kiriting:"
+    
     # Hamkorlar matnini olish
     partners_texts = fetch_all("SELECT text FROM partners ORDER BY id")
     
-    if start_result:
-        start_message = start_result[0]
-        if partners_texts:
-            start_message += "\n\n🤝 Hamkorlarimiz:\n" + "\n".join([text[0] for text in partners_texts])
-    else:
-        start_message = "Salom! Kino kodi yoki Instagram linkini kiriting:"
-        if partners_texts:
-            start_message += "\n\n🤝 Hamkorlarimiz:\n" + "\n".join([text[0] for text in partners_texts])
+    # Hamkorlarni start xabariga qo'shamiz, lekin alohida xabar sifatida emas
+    if partners_texts:
+        start_message += "\n\n🤝 Hamkorlarimiz:\n" + "\n".join([text[0] for text in partners_texts])
     
     # Owner uchun yangi interfeys
     if user_id == OWNER_ID:
@@ -854,7 +714,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ad_text:
             ad_message = ad_text
         else:
-            ad_message = "Iltimos, botdan foydalanish uchun quyidagi kanallarga obuna bo'ling yoki admin bilan bog'laning."
+            # Default reklama matni
+            ad_message = """PREMIUM OBUNA
+
+3   KUNLIK - 5.000 SO'M
+10 KUNLIK - 10.000 SO'M
+30 KUNLIK - 20.000 SO'M
+
+9860100125862977
+Z.Yuldashev"""
         
         keyboard = [
             [InlineKeyboardButton("📨 Chekni yuborish", callback_data="send_receipt")]
@@ -1086,7 +954,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "owner_delete_start":
         execute_query("DELETE FROM start_messages")
-        await query.message.edit_text("✅ Startdagi xabar o'chirildi!", reply_markup=create_keyboard("start_message_actions"))
+        execute_query("DELETE FROM partners")
+        await query.message.edit_text("✅ Startdagi xabar va hamkorlar o'chirildi!", reply_markup=create_keyboard("start_message_actions"))
         return
     
     elif data == "owner_premium_text":
@@ -1096,16 +965,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_add_premium_text":
         context.user_data.clear()
         context.user_data["action"] = "add_premium_text"
-        await query.message.edit_text("⭐ Premium matnni yozing:", reply_markup=create_keyboard("premium_text_actions"))
+        await query.message.edit_text("⭐ Premium matnni yozing (premium videolar uchun):", reply_markup=create_keyboard("premium_text_actions"))
         return
     
     elif data == "owner_view_premium_text":
-        result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
+        result = get_premium_text()
         if result:
             text, photo_id, caption = result
             if photo_id:
                 await query.message.edit_text(f"⭐ Premium matn (rasm bilan):\n\n{caption}", reply_markup=create_keyboard("premium_text_actions"))
-            else:
+            elif text:
                 await query.message.edit_text(f"⭐ Premium matn:\n\n{text}", reply_markup=create_keyboard("premium_text_actions"))
         else:
             await query.message.edit_text("📭 Hali premium matn qo'shilmagan.", reply_markup=create_keyboard("premium_text_actions"))
@@ -1164,18 +1033,26 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_stats":
         total_videos, total_views = get_total_stats()
         
-        top_videos = fetch_all("SELECT code, views FROM video_stats ORDER BY views DESC LIMIT 10")
+        top_videos = fetch_all("SELECT code, views FROM video_stats ORDER BY views DESC LIMIT 30")
         
         stats_text = f"📊 Bot statistikalari:\n\n"
         stats_text += f"📁 Jami videolar: {total_videos} ta\n"
         stats_text += f"👁️ Jami ko'rishlar: {total_views}\n"
         
         if top_videos:
-            stats_text += f"\n🔥 Top 10 video:\n"
+            stats_text += f"\n🔥 Top 30 video:\n"
             for i, video in enumerate(top_videos, 1):
                 video_code, views = video
-                short_name = video_code[:20] + "..." if len(video_code) > 20 else video_code
-                stats_text += f"{i}. {short_name} - {views} 👁️\n"
+                # Instagram linklari uchun to'liq ko'rsatish
+                if video_code.startswith('http'):
+                    # Agar juda uzun bo'lsa, qisqartirish
+                    if len(video_code) > 50:
+                        short_code = video_code[:50] + "..."
+                    else:
+                        short_code = video_code
+                else:
+                    short_code = video_code[:20] + "..." if len(video_code) > 20 else video_code
+                stats_text += f"{i}. {short_code} - {views} 👁️\n"
         
         await query.message.edit_text(stats_text)
         return
@@ -1185,7 +1062,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text(f"👥 Botdagi foydalanuvchilar soni: {user_count}")
         return
     
-    # ---------- YANGI: CAPTION TEXT BOSHQARISH (VIDEOLARGA QO'SHIMCHA MATN) ----------
+    # ---------- CAPTION TEXT BOSHQARISH (VIDEOLARGA QO'SHIMCHA MATN) ----------
     elif data == "owner_add_caption_text":
         context.user_data.clear()
         context.user_data["action"] = "add_caption_text"
@@ -1205,7 +1082,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("✅ Videolarga qo'shimcha caption matn o'chirildi!", reply_markup=create_keyboard("caption_management_actions"))
         return
     
-    # ---------- YANGI: REKLAMA MATNI BOSHQARISH ----------
+    # ---------- REKLAMA MATNI BOSHQARISH ----------
     elif data == "owner_add_ad_text":
         context.user_data.clear()
         context.user_data["action"] = "add_ad_text"
@@ -1301,102 +1178,126 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"📝 Premium video uchun yangi caption yozing (hozirgi: {current_caption}):")
         return
 
-# ---------- OWNER VIDEO HANDLER ----------
-async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != OWNER_ID:
-        return
-    if not update.message.video:
-        return
+# ---------- DO'STLARGA YUBORISH FUNKSIYALARI ----------
+async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Do'stlarga yuborishni boshlash"""
+    query = update.callback_query
+    user_id = query.from_user.id
     
-    action = context.user_data.get("action")
-    
-    if action == "broadcast_video":
-        context.user_data["broadcast_video"] = update.message.video.file_id
-        context.user_data["broadcast_caption"] = update.message.caption or ""
-        context.user_data["action"] = "confirm_broadcast_video"
-        await update.message.reply_text("✅ Video qabul qilindi! Broadcastni boshlash uchun 'HA' yozing:")
+    last_code = context.user_data.get("last_video_code")
+    if not last_code:
+        await query.answer("❌ Video kodi topilmadi. Iltimos, avval videoni ko'ring.", show_alert=True)
         return
     
-    if action == "upload_premium_video":
-        video_caption = update.message.caption or ""
-        context.user_data["premium_video_file_id"] = update.message.video.file_id
-        context.user_data["premium_video_caption"] = video_caption
-        context.user_data["action"] = "set_premium_code"
-        await update.message.reply_text("🎬 Premium video qabul qilindi! Endi video uchun kod yoki linkni yozing:")
+    result = fetch_one("SELECT file_id FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id FROM films WHERE code=?", (last_code,))
+    if not result:
+        await query.answer("❌ Video topilmadi.", show_alert=True)
         return
     
-    # BOSHQA HOLATLAR: Yangi video yuklash
-    video_caption = update.message.caption or ""
-    context.user_data.clear()
-    context.user_data["video_file_id"] = update.message.video.file_id
-    context.user_data["video_caption"] = video_caption
-    context.user_data["action"] = "set_code"
-    await update.message.reply_text("📤 Video qabul qilindi! Endi video uchun kod yoki Instagram linkini yozing:")
-    return
+    await query.message.reply_text(
+        f"🎬 Video ulashish\n\n"
+        f"📹 Video: {last_code}\n\n"
+        f"Do'stlaringizga video yuborish uchun quyidagi tugmani bosing:"
+    )
+    
+    await query.message.reply_text(
+        "📤 Do'stingizga video yuborish uchun quyidagi tugmani bosing:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("📤 Do'stlarga yuborish", switch_inline_query="")
+        ]])
+    )
 
-# ---------- OWNER PHOTO HANDLER ----------
-async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != OWNER_ID:
-        return
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inline query handler - do'stlarga yuborish"""
+    query = update.inline_query
+    user_id = query.from_user.id
     
-    action = context.user_data.get("action")
-    
-    if action == "broadcast_photo":
-        context.user_data["broadcast_photo"] = update.message.photo[-1].file_id
-        context.user_data["broadcast_caption"] = update.message.caption or ""
-        context.user_data["action"] = "confirm_broadcast_photo"
-        await update.message.reply_text("✅ Rasm qabul qilindi! Broadcastni boshlash uchun 'HA' yozing:")
-        return
-    
-    if action == "add_premium_photo":
-        photo_id = update.message.photo[-1].file_id
-        caption = update.message.caption or ""
-        execute_query("INSERT INTO premium_texts (photo_id, caption) VALUES (%s, %s)" if DATABASE_URL else "INSERT INTO premium_texts (photo_id, caption) VALUES (?, ?)", (photo_id, caption))
-        await update.message.reply_text("✅ Premium rasm matni saqlandi!")
-        context.user_data.clear()
-
-# ---------- PHOTO HANDLER ----------
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    
-    if user_id == OWNER_ID:
-        await handle_owner_photo(update, context)
-        return
-    
-    action = context.user_data.get("action")
-    if action == "waiting_receipt":
-        photo_file = update.message.photo[-1].file_id
-        caption = update.message.caption or ""
+    last_code = context.user_data.get("last_video_code")
+    if not last_code:
+        films = fetch_all("SELECT code FROM films ORDER BY code LIMIT 10")
+        if not films:
+            return
         
-        if DATABASE_URL:
-            execute_query("""
-                INSERT INTO bypass_requests (user_id, request_text, status) 
-                VALUES (%s, %s, 'pending')
-                ON CONFLICT (user_id) DO UPDATE SET 
-                request_text = EXCLUDED.request_text,
-                request_date = CURRENT_TIMESTAMP,
-                status = 'pending'
-            """, (user_id, caption))
-        else:
-            execute_query("""
-                INSERT OR REPLACE INTO bypass_requests (user_id, request_text, status) 
-                VALUES (?, ?, 'pending')
-            """, (user_id, caption))
+        results = []
+        for film in films:
+            video_code = film[0]
+            
+            share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+            if video_code.startswith('http'):
+                share_text += f"🔗 Link: {video_code}\n"
+            else:
+                share_text += f"📹 Video kod: {video_code}\n"
+            share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+            share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
+            
+            keyboard = [
+                [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(video_code)}")]
+            ]
+            
+            results.append(
+                InlineQueryResultArticle(
+                    id=hashlib.md5(video_code.encode()).hexdigest()[:64],
+                    title=f"📹 Video: {video_code[:30]}{'...' if len(video_code) > 30 else ''}",
+                    description=f"Do'stingizga video yuboring - {video_code}",
+                    input_message_content=InputTextMessageContent(
+                        message_text=share_text
+                    ),
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            )
+        
+        await query.answer(results)
+        return
+    
+    result = fetch_one("SELECT file_id FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id FROM films WHERE code=?", (last_code,))
+    if not result:
+        return
+    
+    share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+    if last_code.startswith('http'):
+        share_text += f"🔗 Link: {last_code}\n"
+    else:
+        share_text += f"📹 Video kod: {last_code}\n"
+    share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+    share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
+    
+    keyboard = [
+        [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(last_code)}")]
+    ]
+    
+    results = [
+        InlineQueryResultArticle(
+            id=hashlib.md5(last_code.encode()).hexdigest()[:64],
+            title="📤 Do'stingizga video yuboring",
+            description=f"Video: {last_code}",
+            input_message_content=InputTextMessageContent(
+                message_text=share_text
+            ),
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    ]
+    
+    await query.answer(results)
+
+async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tanlangan inline result - do'stga yuborilganda"""
+    chosen_result = update.chosen_inline_result
+    user_id = chosen_result.from_user.id
+    result_id = chosen_result.result_id
+    
+    last_code = context.user_data.get("last_video_code")
+    if last_code:
+        context.user_data.setdefault("shared_count", 0)
+        context.user_data["shared_count"] += 1
         
         try:
-            await context.bot.send_photo(
-                OWNER_ID, 
-                photo_file, 
-                caption=f"📨 Yangi chek so'rovi!\nUser ID: {user_id}\nIzoh: {caption}\n\nPremium berish uchun /premium {user_id} 30 (30 kunlik)"
+            await context.bot.send_message(
+                user_id,
+                f"✅ Video {last_code} do'stingizga yuborildi!\n"
+                f"Jami yuborilgan do'stlar: {context.user_data['shared_count']}"
             )
-        except Exception as e:
-            print(f"Xatolik ownerga xabar yuborishda: {e}")
-        
-        await update.message.reply_text(
-            "✅ Chek qabul qilindi! Admin tekshiradi va sizga premium beriladi. "
-            "Tasdiqlash uchun biroz kuting."
-        )
-        context.user_data.clear()
+        except:
+            pass
 
 # ---------- TEXT HANDLER ----------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1670,7 +1571,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count = 0
             failed = 0
             
-            premium_result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
+            premium_result = get_premium_text()
             
             for u in users:
                 try:
@@ -1913,17 +1814,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_video_caption(update, context)
             return
         else:
-            premium_text_result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
-            if premium_text_result:
-                premium_text, photo_id, caption = premium_text_result
+            premium_result = get_premium_text()
+            if premium_result:
+                premium_text, photo_id, caption = premium_result
                 if photo_id:
                     await update.message.reply_photo(photo_id, caption=caption)
                 elif premium_text:
                     await update.message.reply_text(premium_text)
             
+            # Premium obuna tugmasi bilan xabar
+            keyboard = [
+                [InlineKeyboardButton("🎫 PREMIUM OBUNA", callback_data="bypass_ads")]
+            ]
             await update.message.reply_text(
                 "❗ Bu video faqat premium foydalanuvchilar uchun!\n"
-                "Premium olish uchun admin bilan bog'laning."
+                "Premium olish uchun pastdagi tugmani bosing:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
     
@@ -1985,6 +1891,103 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Bunday kod/linkka film topilmadi! Iltimos, to'g'ri kod yoki linkni yuboring.")
 
+# ---------- OWNER VIDEO HANDLER ----------
+async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id != OWNER_ID:
+        return
+    if not update.message.video:
+        return
+    
+    action = context.user_data.get("action")
+    
+    if action == "broadcast_video":
+        context.user_data["broadcast_video"] = update.message.video.file_id
+        context.user_data["broadcast_caption"] = update.message.caption or ""
+        context.user_data["action"] = "confirm_broadcast_video"
+        await update.message.reply_text("✅ Video qabul qilindi! Broadcastni boshlash uchun 'HA' yozing:")
+        return
+    
+    if action == "upload_premium_video":
+        video_caption = update.message.caption or ""
+        context.user_data["premium_video_file_id"] = update.message.video.file_id
+        context.user_data["premium_video_caption"] = video_caption
+        context.user_data["action"] = "set_premium_code"
+        await update.message.reply_text("🎬 Premium video qabul qilindi! Endi video uchun kod yoki linkni yozing:")
+        return
+    
+    # BOSHQA HOLATLAR: Yangi video yuklash
+    video_caption = update.message.caption or ""
+    context.user_data.clear()
+    context.user_data["video_file_id"] = update.message.video.file_id
+    context.user_data["video_caption"] = video_caption
+    context.user_data["action"] = "set_code"
+    await update.message.reply_text("📤 Video qabul qilindi! Endi video uchun kod yoki Instagram linkini yozing:")
+    return
+
+# ---------- OWNER PHOTO HANDLER ----------
+async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.from_user.id != OWNER_ID:
+        return
+    
+    action = context.user_data.get("action")
+    
+    if action == "broadcast_photo":
+        context.user_data["broadcast_photo"] = update.message.photo[-1].file_id
+        context.user_data["broadcast_caption"] = update.message.caption or ""
+        context.user_data["action"] = "confirm_broadcast_photo"
+        await update.message.reply_text("✅ Rasm qabul qilindi! Broadcastni boshlash uchun 'HA' yozing:")
+        return
+    
+    if action == "add_premium_photo":
+        photo_id = update.message.photo[-1].file_id
+        caption = update.message.caption or ""
+        execute_query("INSERT INTO premium_texts (photo_id, caption) VALUES (%s, %s)" if DATABASE_URL else "INSERT INTO premium_texts (photo_id, caption) VALUES (?, ?)", (photo_id, caption))
+        await update.message.reply_text("✅ Premium rasm matni saqlandi!")
+        context.user_data.clear()
+
+# ---------- PHOTO HANDLER ----------
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    if user_id == OWNER_ID:
+        await handle_owner_photo(update, context)
+        return
+    
+    action = context.user_data.get("action")
+    if action == "waiting_receipt":
+        photo_file = update.message.photo[-1].file_id
+        caption = update.message.caption or ""
+        
+        if DATABASE_URL:
+            execute_query("""
+                INSERT INTO bypass_requests (user_id, request_text, status) 
+                VALUES (%s, %s, 'pending')
+                ON CONFLICT (user_id) DO UPDATE SET 
+                request_text = EXCLUDED.request_text,
+                request_date = CURRENT_TIMESTAMP,
+                status = 'pending'
+            """, (user_id, caption))
+        else:
+            execute_query("""
+                INSERT OR REPLACE INTO bypass_requests (user_id, request_text, status) 
+                VALUES (?, ?, 'pending')
+            """, (user_id, caption))
+        
+        try:
+            await context.bot.send_photo(
+                OWNER_ID, 
+                photo_file, 
+                caption=f"📨 Yangi chek so'rovi!\nUser ID: {user_id}\nIzoh: {caption}\n\nPremium berish uchun /premium {user_id} 30 (30 kunlik)"
+            )
+        except Exception as e:
+            print(f"Xatolik ownerga xabar yuborishda: {e}")
+        
+        await update.message.reply_text(
+            "✅ Chek qabul qilindi! Admin tekshiradi va sizga premium beriladi. "
+            "Tasdiqlash uchun biroz kuting."
+        )
+        context.user_data.clear()
+
 # ---------- COMMAND HANDLER ----------
 async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Owner uchun premium berish command"""
@@ -2032,10 +2035,19 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Xatolik! User ID va kunlar sonini to'g'ri kiriting.")
 
+# ---------- OWNER PANELINI YANGILASH ----------
+async def owner_start_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner uchun start command"""
+    if update.message.from_user.id != OWNER_ID:
+        return
+    
+    await update.message.reply_text("👑 Owner paneli:", reply_markup=create_keyboard("main"))
+
 # ---------- APPLICATION ----------
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("premium", premium_command))
+app.add_handler(CommandHandler("owner", owner_start_message))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(filters.VIDEO, handle_owner_video))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
@@ -2057,7 +2069,7 @@ if __name__ == '__main__':
     
     # 2. Mavjud videolarni yangi formatga o'tkazish (ko'rishlar olib tashlash)
     try:
-        print("🔄 Mavjud videolar yangi formatga o'tkazilmoqda...")
+        print("🔄 Mavjud videolarni yangilash...")
         
         films = fetch_all("SELECT code, caption FROM films")
         print(f"📁 {len(films)} ta video topildi")
