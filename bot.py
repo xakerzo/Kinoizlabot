@@ -92,7 +92,7 @@ if DATABASE_URL:
     )
     cursor = conn.cursor()
     
-    # PostgreSQL uchun jadvallar
+    # PostgreSQL uchun jadvallar - FAKAT YANGI JADVALLARNI YARATAMIZ
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS films (
             code TEXT PRIMARY KEY,
@@ -378,7 +378,8 @@ def update_video_stats(code):
 def update_total_videos_count():
     """Jami videolar sonini yangilash"""
     films_count = fetch_one("SELECT COUNT(*) FROM films")[0]
-    premium_count = fetch_one("SELECT COUNT(*) FROM premium_videos")[0]
+    premium_count_result = fetch_one("SELECT COUNT(*) FROM premium_videos")
+    premium_count = premium_count_result[0] if premium_count_result else 0
     total_count = films_count + premium_count
     
     total_result = fetch_one("SELECT total_videos FROM total_stats WHERE id=1")
@@ -400,6 +401,53 @@ def get_video_stats(code):
     if result:
         return result[0]
     return 0
+
+# ---------- JADVALLARNI TEKSHIRISH VA YANGILASH ----------
+def check_and_update_database():
+    """Database jadvallarini tekshirish va yangilash"""
+    try:
+        print("🔍 Database jadvallarini tekshirilmoqda...")
+        
+        # Films jadvalida caption ustuni borligini tekshirish
+        if DATABASE_URL:
+            # PostgreSQL uchun
+            try:
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='films' AND column_name='caption'
+                """)
+                result = cursor.fetchone()
+                if not result:
+                    print("✅ films jadvaliga caption ustuni qo'shilmoqda...")
+                    cursor.execute("ALTER TABLE films ADD COLUMN caption TEXT DEFAULT ''")
+                    conn.commit()
+                    print("✅ caption ustuni qo'shildi!")
+                else:
+                    print("✅ films jadvalida caption ustuni allaqachon mavjud")
+            except Exception as e:
+                print(f"⚠️ films jadvalini tekshirishda xatolik: {e}")
+        else:
+            # SQLite uchun
+            try:
+                cursor.execute("PRAGMA table_info(films)")
+                columns = [column[1] for column in cursor.fetchall()]
+                if 'caption' not in columns:
+                    print("✅ films jadvaliga caption ustuni qo'shilmoqda...")
+                    cursor.execute("ALTER TABLE films ADD COLUMN caption TEXT DEFAULT ''")
+                    conn.commit()
+                    print("✅ caption ustuni qo'shildi!")
+                else:
+                    print("✅ films jadvalida caption ustuni allaqachon mavjud")
+            except Exception as e:
+                print(f"⚠️ films jadvalini tekshirishda xatolik: {e}")
+        
+        print("✅ Database tekshirildi va yangilandi!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Database tekshirishda xatolik: {e}")
+        return False
 
 # ---------- VIDEO OSTIDAGI MATN FUNKSIYALARI ----------
 async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE, video_code=None):
@@ -481,10 +529,11 @@ def get_original_code_from_callback(short_code):
             return original_code
     
     premium_films = fetch_all("SELECT code FROM premium_videos")
-    for film in premium_films:
-        original_code = film[0]
-        if create_safe_callback_data(original_code) == short_code:
-            return original_code
+    if premium_films:
+        for film in premium_films:
+            original_code = film[0]
+            if create_safe_callback_data(original_code) == short_code:
+                return original_code
     
     return short_code
 
@@ -863,7 +912,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action = data.replace("owner_", "")
         
         if user_id != OWNER_ID:
-            await query.answer("❌ Bu funksiya faqat owner uchun!")
+            await query.answer("❌ Bu funksiya faqat owner uchun!", show_alert=True)
             return
         
         if action == "📤":
@@ -959,6 +1008,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         action = data.replace("owner_action_", "")
         
         if user_id != OWNER_ID:
+            await query.answer("❌ Bu funksiya faqat owner uchun!", show_alert=True)
             return
         
         context.user_data.clear()
@@ -1921,7 +1971,7 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (user_id, expiry_date, OWNER_ID, datetime.now()))
         else:
             execute_query("""
-                INSERT OR REPLACE INTO premium_videos (user_id, expiry_date, approved_by, approved_date) 
+                INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
                 VALUES (?, ?, ?, ?)
             """, (user_id, expiry_date.isoformat(), OWNER_ID, datetime.now().isoformat()))
         
@@ -1955,40 +2005,67 @@ app.add_handler(ChosenInlineResultHandler(handle_chosen_inline_result))
 
 # ---------- BOT ISHGA TUSHGANDA ----------
 if __name__ == '__main__':
-    print("Bot ishga tushdi...")
+    print("🤖 Bot ishga tushmoqda...")
     
-    # Barcha videolar sonini hisoblash
-    update_total_videos_count()
+    # 1. Database jadvallarini tekshirish
+    print("🔍 Database jadvallarini tekshirilmoqda...")
+    success = check_and_update_database()
     
-    # Mavjud videolarni yangi formatga o'tkazish
-    films = fetch_all("SELECT code, caption FROM films")
-    for film in films:
-        code, current_caption = film
-        
-        video_views = get_video_stats(code)
-        
-        if current_caption and "👁️ Ko'rishlar:" not in current_caption:
-            new_caption = f"{current_caption}\n\n👁️ Ko'rishlar: {video_views}"
-            execute_query("UPDATE films SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE films SET caption=? WHERE code=?", (new_caption, code))
-        elif not current_caption:
-            if code.startswith('http'):
-                new_caption = f"🔗 Link: {code}\n\n👁️ Ko'rishlar: {video_views}"
-            else:
-                new_caption = f"📹 Kod: {code}\n\n👁️ Ko'rishlar: {video_views}"
-            execute_query("UPDATE films SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE films SET caption=? WHERE code=?", (new_caption, code))
+    if not success:
+        print("⚠️ Database tekshirishda muammo bo'ldi, lekin bot ishlashda davom etadi...")
     
-    # Premium videolarni yangi formatga o'tkazish
-    premium_films = fetch_all("SELECT code, caption FROM premium_videos")
-    for film in premium_films:
-        code, current_caption = film
-        
-        video_views = get_video_stats(code)
-        
-        if current_caption and "👁️ Ko'rishlar:" not in current_caption:
-            new_caption = f"{current_caption}\n\n👁️ Ko'rishlar: {video_views}"
-            execute_query("UPDATE premium_videos SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE premium_videos SET caption=? WHERE code=?", (new_caption, code))
-        elif not current_caption:
-            new_caption = f"🎬 Premium video\n📹 Kod: {code}\n\n👁️ Ko'rishlar: {video_views}"
-            execute_query("UPDATE premium_videos SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE premium_videos SET caption=? WHERE code=?", (new_caption, code))
+    # 2. Jami videolar sonini yangilash
+    try:
+        print("📊 Videolar soni yangilanmoqda...")
+        update_total_videos_count()
+        print("✅ Videolar soni yangilandi!")
+    except Exception as e:
+        print(f"⚠️ Videolar sonini yangilashda xatolik: {e}")
     
-    app.run_polling()
+    # 3. Mavjud videolarni yangi formatga o'tkazish
+    try:
+        print("🔄 Mavjud videolar yangi formatga o'tkazilmoqda...")
+        
+        # Avval faqat code ustunini olish
+        films = fetch_all("SELECT code FROM films")
+        print(f"📁 {len(films)} ta video topildi")
+        
+        updated_count = 0
+        for film in films:
+            code = film[0]
+            try:
+                # Video statistikasini olish
+                video_views = get_video_stats(code)
+                
+                # Joriy captionni tekshirish
+                result = fetch_one("SELECT caption FROM films WHERE code=%s" if DATABASE_URL else "SELECT caption FROM films WHERE code=?", (code,))
+                current_caption = result[0] if result else ""
+                
+                # Agar caption bo'sh yoki yo'q bo'lsa
+                if not current_caption or current_caption.strip() == '':
+                    # Yangi caption yaratish
+                    if code.startswith('http'):
+                        new_caption = f"🔗 Link: {code}\n\n👁️ Ko'rishlar: {video_views}"
+                    else:
+                        new_caption = f"📹 Kod: {code}\n\n👁️ Ko'rishlar: {video_views}"
+                    
+                    # Update qilish
+                    execute_query("UPDATE films SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE films SET caption=? WHERE code=?", (new_caption, code))
+                    updated_count += 1
+                    print(f"✅ {code} video captioni yangilandi")
+            
+            except Exception as e:
+                print(f"⚠️ {code} video yangilashda xatolik: {e}")
+                continue
+        
+        print(f"✅ {updated_count} ta video yangi formatga o'tkazildi!")
+        
+    except Exception as e:
+        print(f"⚠️ Videolarni yangilashda xatolik: {e}")
+    
+    # 4. Botni ishga tushirish
+    try:
+        print("🚀 Bot ishga tushmoqda...")
+        app.run_polling()
+    except Exception as e:
+        print(f"❌ Bot ishga tushishda xatolik: {e}")
