@@ -56,6 +56,14 @@ OWNER_KEYBOARD = {
     "premium_management_actions": [
         [("👤 Userga premium berish", "owner_give_premium"), ("📋 Premium foydalanuvchilar", "owner_view_premium_users")],
         [("🗑 Premiumni olib tashlash", "owner_remove_premium"), ("⬅️ Ortga", "owner_back")]
+    ],
+    "caption_management_actions": [
+        [("📝 Caption matn qo'shish", "owner_add_caption_text"), ("🔍 Caption matnni tekshirish", "owner_view_caption_text")],
+        [("🗑 Caption matnni o'chirish", "owner_delete_caption_text"), ("⬅️ Ortga", "owner_back")]
+    ],
+    "ad_text_actions": [
+        [("📝 Reklama matni qo'shish", "owner_add_ad_text"), ("🔍 Reklama matnni tekshirish", "owner_view_ad_text")],
+        [("🗑 Reklama matnni o'chirish", "owner_delete_ad_text"), ("⬅️ Ortga", "owner_back")]
     ]
 }
 
@@ -205,6 +213,13 @@ if DATABASE_URL:
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS caption_texts (
+            id SERIAL PRIMARY KEY,
+            text TEXT NOT NULL
+        )
+    """)
+    
 else:
     # Lokal SQLite uchun
     import sqlite3
@@ -311,6 +326,13 @@ else:
             total_views INTEGER DEFAULT 0
         )
     """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS caption_texts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL
+        )
+    """)
 
 conn.commit()
 
@@ -412,6 +434,21 @@ def get_video_stats(code):
         return result[0]
     return 0
 
+# ---------- VIDEO CAPTION FUNKSIYALARI ----------
+def get_caption_text():
+    """Caption matnini olish (videolarga qo'shimcha matn)"""
+    result = fetch_one("SELECT text FROM caption_texts ORDER BY id DESC LIMIT 1")
+    if result:
+        return result[0]
+    return ""
+
+def get_ad_text():
+    """Reklama matnini olish"""
+    result = fetch_one("SELECT text FROM ad_texts ORDER BY id DESC LIMIT 1")
+    if result:
+        return result[0]
+    return ""
+
 # ---------- VIDEO OSTIDAGI MATN FUNKSIYALARI ----------
 async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE, video_code=None):
     """Video dan keyin matn yuborish"""
@@ -422,22 +459,41 @@ async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE,
         if not video_code:
             return
         
+        # Video caption matnini olish
         caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
         
+        # Caption text (videolarga qo'shimcha matn)
+        caption_text = get_caption_text()
+        
+        # Bot nomini qo'shish
+        bot_info = f"\n\n🤖 {BOT_USERNAME}"
+        
         if caption_result:
+            full_text = f"{caption_result[0]}{bot_info}"
+            
+            # Agar caption text mavjud bo'lsa, qo'shamiz
+            if caption_text:
+                full_text += f"\n\n{caption_text}"
+            
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
             ]
             await update.message.reply_text(
-                caption_result[0],
+                full_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
+            full_text = f"Quyidagi tugmalardan foydalaning:{bot_info}"
+            
+            # Agar caption text mavjud bo'lsa, qo'shamiz
+            if caption_text:
+                full_text += f"\n\n{caption_text}"
+            
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
             ]
             await update.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
+                full_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
     except Exception as e:
@@ -452,22 +508,41 @@ async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE, video
         if not video_code:
             return
         
+        # Video caption matnini olish
         caption_result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
         
+        # Caption text (videolarga qo'shimcha matn)
+        caption_text = get_caption_text()
+        
+        # Bot nomini qo'shish
+        bot_info = f"\n\n🤖 {BOT_USERNAME}"
+        
         if caption_result:
+            full_text = f"{caption_result[0]}{bot_info}"
+            
+            # Agar caption text mavjud bo'lsa, qo'shamiz
+            if caption_text:
+                full_text += f"\n\n{caption_text}"
+            
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
             ]
             await query.message.reply_text(
-                caption_result[0],
+                full_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
+            full_text = f"Quyidagi tugmalardan foydalaning:{bot_info}"
+            
+            # Agar caption text mavjud bo'lsa, qo'shamiz
+            if caption_text:
+                full_text += f"\n\n{caption_text}"
+            
             keyboard = [
                 [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
             ]
             await query.message.reply_text(
-                "Quyidagi tugmalardan foydalaning:",
+                full_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
     except Exception as e:
@@ -644,10 +719,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_premium:
                 context.user_data["last_video_code"] = video_code
                 update_video_stats(video_code)
-                video_views = get_video_stats(video_code)
                 
-                # "Ko'rishlar" qismini captionga qo'shmasdan yuborish
-                final_caption = video_caption if video_caption else f"🎬 Premium video\n📹 Kod: {video_code}"
+                # Video kodini captionga qo'shish
+                if video_caption:
+                    final_caption = f"{video_caption}\n\n📹 Kod: {video_code}"
+                else:
+                    final_caption = f"🎬 Premium video\n📹 Kod: {video_code}"
+                
+                # Caption text qo'shish
+                caption_text = get_caption_text()
+                if caption_text:
+                    final_caption += f"\n\n{caption_text}"
                 
                 await update.message.reply_video(file_id, caption=final_caption)
                 await send_video_caption(update, context)
@@ -677,7 +759,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             is_premium = is_premium_user(user_id)
             
-            # "Ko'rishlar" qismini captionga qo'shmasdan yuborish
+            # Video kodini captionga qo'shish
             if video_caption:
                 final_caption = video_caption
             else:
@@ -685,6 +767,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     final_caption = f"🔗 Link: {video_code}"
                 else:
                     final_caption = f"📹 Kod: {video_code}"
+            
+            # Caption text qo'shish
+            caption_text = get_caption_text()
+            if caption_text:
+                final_caption += f"\n\n{caption_text}"
             
             if is_premium:
                 await update.message.reply_video(file_id, caption=final_caption)
@@ -762,18 +849,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- REKLAMA BYPASS TUGMASI ----------
     if data == "bypass_ads":
-        ad_result = fetch_one("SELECT text FROM ad_texts ORDER BY id DESC LIMIT 1")
+        ad_text = get_ad_text()
         
-        if ad_result:
-            ad_text = ad_result[0]
+        if ad_text:
+            ad_message = ad_text
         else:
-            ad_text = "Iltimos, botdan foydalanish uchun quyidagi kanallarga obuna bo'ling yoki admin bilan bog'laning."
+            ad_message = "Iltimos, botdan foydalanish uchun quyidagi kanallarga obuna bo'ling yoki admin bilan bog'laning."
         
         keyboard = [
             [InlineKeyboardButton("📨 Chekni yuborish", callback_data="send_receipt")]
         ]
         await query.message.reply_text(
-            f"{ad_text}\n\nAgar sizda reklama/obuna bypass qilish uchun chek bo'lsa, uni yuborishingiz mumkin:",
+            f"{ad_message}\n\nAgar sizda reklama/obuna bypass qilish uchun chek bo'lsa, uni yuborishingiz mumkin:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -800,8 +887,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_id, video_caption, extra_text = result
                 update_video_stats(code)
                 
-                # "Ko'rishlar" qismini olib tashlash
-                final_caption = video_caption if video_caption else f"📹 Kod: {code}" if not code.startswith('http') else f"🔗 Link: {code}"
+                # Video kodini captionga qo'shish
+                if video_caption:
+                    final_caption = video_caption
+                else:
+                    if code.startswith('http'):
+                        final_caption = f"🔗 Link: {code}"
+                    else:
+                        final_caption = f"📹 Kod: {code}"
+                
+                # Caption text qo'shish
+                caption_text = get_caption_text()
+                if caption_text:
+                    final_caption += f"\n\n{caption_text}"
                 
                 await query.message.reply_video(file_id, caption=final_caption)
                 context.user_data["last_video_code"] = code
@@ -840,8 +938,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             update_video_stats(code)
-            # "Ko'rishlar" qismini olib tashlash
-            final_caption = video_caption if video_caption else f"📹 Kod: {code}" if not code.startswith('http') else f"🔗 Link: {code}"
+            # Video kodini captionga qo'shish
+            if video_caption:
+                final_caption = video_caption
+            else:
+                if code.startswith('http'):
+                    final_caption = f"🔗 Link: {code}"
+                else:
+                    final_caption = f"📹 Kod: {code}"
+            
+            # Caption text qo'shish
+            caption_text = get_caption_text()
+            if caption_text:
+                final_caption += f"\n\n{caption_text}"
             
             await query.message.reply_video(file_id, caption=final_caption)
             context.user_data["last_video_code"] = code
@@ -935,19 +1044,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     elif data == "owner_caption":
-        await query.message.edit_text("📝 Video ostidagi matn:", reply_markup=create_keyboard("video_caption_actions"))
+        await query.message.edit_text("📝 Video ostidagi matn (videodan keyin chiqadigan matn):", reply_markup=create_keyboard("video_caption_actions"))
         return
     
     elif data == "owner_add_caption":
         context.user_data.clear()
         context.user_data["action"] = "add_video_caption"
-        await query.message.edit_text("📝 Video ostidagi matnni yozing:", reply_markup=create_keyboard("video_caption_actions"))
+        await query.message.edit_text("📝 Video ostidagi matnni yozing (videodan keyin chiqadi):", reply_markup=create_keyboard("video_caption_actions"))
         return
     
     elif data == "owner_view_caption":
         result = fetch_one("SELECT caption_text FROM video_captions ORDER BY id DESC LIMIT 1")
         if result:
-            await query.message.edit_text(f"📝 Video ostidagi matn:\n\n{result[0]}", reply_markup=create_keyboard("video_caption_actions"))
+            await query.message.edit_text(f"📝 Video ostidagi matn (videodan keyin chiqadi):\n\n{result[0]}", reply_markup=create_keyboard("video_caption_actions"))
         else:
             await query.message.edit_text("📭 Hali video ostidagi matn qo'shilmagan.", reply_markup=create_keyboard("video_caption_actions"))
         return
@@ -1074,6 +1183,46 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_users":
         user_count = fetch_one("SELECT COUNT(*) FROM users")[0]
         await query.message.edit_text(f"👥 Botdagi foydalanuvchilar soni: {user_count}")
+        return
+    
+    # ---------- YANGI: CAPTION TEXT BOSHQARISH (VIDEOLARGA QO'SHIMCHA MATN) ----------
+    elif data == "owner_add_caption_text":
+        context.user_data.clear()
+        context.user_data["action"] = "add_caption_text"
+        await query.message.edit_text("📝 Videolarga qo'shimcha caption matnini yozing (barcha videolarga qo'shiladi):", reply_markup=create_keyboard("caption_management_actions"))
+        return
+    
+    elif data == "owner_view_caption_text":
+        result = fetch_one("SELECT text FROM caption_texts ORDER BY id DESC LIMIT 1")
+        if result:
+            await query.message.edit_text(f"📝 Videolarga qo'shimcha caption matn:\n\n{result[0]}", reply_markup=create_keyboard("caption_management_actions"))
+        else:
+            await query.message.edit_text("📭 Hali caption matn qo'shilmagan.", reply_markup=create_keyboard("caption_management_actions"))
+        return
+    
+    elif data == "owner_delete_caption_text":
+        execute_query("DELETE FROM caption_texts")
+        await query.message.edit_text("✅ Videolarga qo'shimcha caption matn o'chirildi!", reply_markup=create_keyboard("caption_management_actions"))
+        return
+    
+    # ---------- YANGI: REKLAMA MATNI BOSHQARISH ----------
+    elif data == "owner_add_ad_text":
+        context.user_data.clear()
+        context.user_data["action"] = "add_ad_text"
+        await query.message.edit_text("📝 Reklama matnini yozing (bypass tugmasida ko'rinadi):", reply_markup=create_keyboard("ad_text_actions"))
+        return
+    
+    elif data == "owner_view_ad_text":
+        result = fetch_one("SELECT text FROM ad_texts ORDER BY id DESC LIMIT 1")
+        if result:
+            await query.message.edit_text(f"📝 Reklama matn:\n\n{result[0]}", reply_markup=create_keyboard("ad_text_actions"))
+        else:
+            await query.message.edit_text("📭 Hali reklama matn qo'shilmagan.", reply_markup=create_keyboard("ad_text_actions"))
+        return
+    
+    elif data == "owner_delete_ad_text":
+        execute_query("DELETE FROM ad_texts")
+        await query.message.edit_text("✅ Reklama matn o'chirildi!", reply_markup=create_keyboard("ad_text_actions"))
         return
     
     # ---------- VIDEO EDIT TUGMALARI ----------
@@ -1264,6 +1413,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             return
         
+        # Videolarga qo'shimcha caption matn qo'shish
+        elif action == "add_caption_text":
+            execute_query("INSERT INTO caption_texts (text) VALUES (%s)" if DATABASE_URL else "INSERT INTO caption_texts (text) VALUES (?)", (text,))
+            await update.message.reply_text("✅ Videolarga qo'shimcha caption matn saqlandi! Endi barcha videolarning captioniga bu matn qo'shiladi.")
+            context.user_data.clear()
+            return
+        
+        # Reklama matni qo'shish
+        elif action == "add_ad_text":
+            execute_query("INSERT INTO ad_texts (text) VALUES (%s)" if DATABASE_URL else "INSERT INTO ad_texts (text) VALUES (?)", (text,))
+            await update.message.reply_text("✅ Reklama matni saqlandi! Endi 'Reklama siz ishlatish' tugmasida bu matn ko'rinadi.")
+            context.user_data.clear()
+            return
+        
         # Start xabarini qo'shish
         if action == "add_start_message":
             execute_query("INSERT INTO start_messages (message_text) VALUES (%s)" if DATABASE_URL else "INSERT INTO start_messages (message_text) VALUES (?)", (text,))
@@ -1307,7 +1470,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             update_total_videos_count()
             
-            # "Ko'rishlar" qismini olib tashlash
+            # Video kodini captionga qo'shish
             if video_caption:
                 final_caption = video_caption
             else:
@@ -1315,6 +1478,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     final_caption = f"🔗 Link: {text}"
                 else:
                     final_caption = f"📹 Kod: {text}"
+            
+            # Caption text qo'shish
+            caption_text = get_caption_text()
+            if caption_text:
+                final_caption += f"\n\n{caption_text}"
             
             safe_code = create_safe_callback_data(text)
             keyboard = [
@@ -1340,10 +1508,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = fetch_one("SELECT file_id, caption, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, caption, extra_text FROM films WHERE code=?", (text,))
             if result:
                 file_id, video_caption, extra_text = result
-                video_views = get_video_stats(text)
                 
-                # "Ko'rishlar" qismini olib tashlash
-                final_caption = video_caption if video_caption else f"📹 Kod: {text}" if not text.startswith('http') else f"🔗 Link: {text}"
+                # Video kodini captionga qo'shish
+                if video_caption:
+                    final_caption = video_caption
+                else:
+                    if text.startswith('http'):
+                        final_caption = f"🔗 Link: {text}"
+                    else:
+                        final_caption = f"📹 Kod: {text}"
+                
+                # Caption text qo'shish
+                caption_text = get_caption_text()
+                if caption_text:
+                    final_caption += f"\n\n{caption_text}"
                 
                 safe_code = create_safe_callback_data(text)
                 keyboard = [
@@ -1380,8 +1558,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             update_total_videos_count()
             
-            # "Ko'rishlar" qismini olib tashlash
-            final_caption = video_caption if video_caption else f"🎬 Premium video\n📹 Kod: {text}"
+            # Video kodini captionga qo'shish
+            if video_caption:
+                final_caption = f"{video_caption}\n\n📹 Kod: {text}"
+            else:
+                final_caption = f"🎬 Premium video\n📹 Kod: {text}"
             
             safe_code = create_safe_callback_data(text)
             keyboard = [
@@ -1403,10 +1584,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = fetch_one("SELECT file_id, caption, extra_text FROM premium_videos WHERE code=%s" if DATABASE_URL else "SELECT file_id, caption, extra_text FROM premium_videos WHERE code=?", (text,))
             if result:
                 file_id, video_caption, extra_text = result
-                video_views = get_video_stats(text)
                 
-                # "Ko'rishlar" qismini olib tashlash
-                final_caption = video_caption if video_caption else f"🎬 Premium video\n📹 Kod: {text}"
+                # Video kodini captionga qo'shish
+                if video_caption:
+                    final_caption = f"{video_caption}\n\n📹 Kod: {text}"
+                else:
+                    final_caption = f"🎬 Premium video\n📹 Kod: {text}"
                 
                 safe_code = create_safe_callback_data(text)
                 keyboard = [
@@ -1527,8 +1710,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if result:
                 file_id, video_caption, extra_text = result
                 
-                # "Ko'rishlar" qismini olib tashlash
-                final_caption = video_caption if video_caption else f"📹 Kod: {new_code}" if not new_code.startswith('http') else f"🔗 Link: {new_code}"
+                # Video kodini captionga qo'shish
+                if video_caption:
+                    final_caption = video_caption
+                else:
+                    if new_code.startswith('http'):
+                        final_caption = f"🔗 Link: {new_code}"
+                    else:
+                        final_caption = f"📹 Kod: {new_code}"
+                
+                # Caption text qo'shish
+                caption_text = get_caption_text()
+                if caption_text:
+                    final_caption += f"\n\n{caption_text}"
                 
                 safe_code = create_safe_callback_data(new_code)
                 keyboard = [
@@ -1562,8 +1756,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if result:
                 file_id, video_caption, extra_text = result
                 
-                # "Ko'rishlar" qismini olib tashlash
-                final_caption = video_caption if video_caption else f"🎬 Premium video\n📹 Kod: {new_code}"
+                # Video kodini captionga qo'shish
+                if video_caption:
+                    final_caption = f"{video_caption}\n\n📹 Kod: {new_code}"
+                else:
+                    final_caption = f"🎬 Premium video\n📹 Kod: {new_code}"
                 
                 safe_code = create_safe_callback_data(new_code)
                 keyboard = [
@@ -1584,21 +1781,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             video_code = context.user_data.get("video_code")
             video_type = context.user_data.get("video_type")
             
-            # "Ko'rishlar" qismini olib tashlash
-            if new_caption:
-                final_caption = new_caption
-            else:
-                if video_code.startswith('http'):
-                    final_caption = f"🔗 Link: {video_code}"
-                else:
-                    final_caption = f"📹 Kod: {video_code}"
-            
             if video_type == "normal":
-                execute_query("UPDATE films SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE films SET caption=? WHERE code=?", (final_caption, video_code))
+                execute_query("UPDATE films SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE films SET caption=? WHERE code=?", (new_caption, video_code))
                 
                 result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (video_code,))
                 if result:
                     file_id, extra_text = result
+                    
+                    # Caption text qo'shish
+                    caption_text = get_caption_text()
+                    if caption_text and caption_text not in new_caption:
+                        final_caption = f"{new_caption}\n\n{caption_text}"
+                    else:
+                        final_caption = new_caption
                     
                     safe_code = create_safe_callback_data(video_code)
                     keyboard = [
@@ -1610,7 +1805,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=final_caption)
             
             elif video_type == "premium":
-                execute_query("UPDATE premium_videos SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE premium_videos SET caption=? WHERE code=?", (final_caption, video_code))
+                execute_query("UPDATE premium_videos SET caption=%s WHERE code=%s" if DATABASE_URL else "UPDATE premium_videos SET caption=? WHERE code=?", (new_caption, video_code))
                 
                 result = fetch_one("SELECT file_id, extra_text FROM premium_videos WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM premium_videos WHERE code=?", (video_code,))
                 if result:
@@ -1623,7 +1818,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         [InlineKeyboardButton("📝 Caption edit", callback_data=f"premium_edit_caption_{safe_code}")]
                     ]
                     
-                    await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=final_caption)
+                    await update.message.reply_video(file_id, reply_markup=InlineKeyboardMarkup(keyboard), caption=new_caption)
             
             await update.message.reply_text("✅ Video caption yangilandi!")
             context.user_data.clear()
@@ -1703,8 +1898,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["last_video_code"] = text
             update_video_stats(text)
             
-            # "Ko'rishlar" qismini olib tashlash
-            final_caption = video_caption if video_caption else f"🎬 Premium video\n📹 Kod: {text}"
+            # Video kodini captionga qo'shish
+            if video_caption:
+                final_caption = f"{video_caption}\n\n📹 Kod: {text}"
+            else:
+                final_caption = f"🎬 Premium video\n📹 Kod: {text}"
+            
+            # Caption text qo'shish
+            caption_text = get_caption_text()
+            if caption_text:
+                final_caption += f"\n\n{caption_text}"
             
             await update.message.reply_video(file_id, caption=final_caption)
             await send_video_caption(update, context)
@@ -1734,7 +1937,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         is_premium = is_premium_user(user_id)
         
-        # "Ko'rishlar" qismini olib tashlash
+        # Video kodini captionga qo'shish
         if video_caption:
             final_caption = video_caption
         else:
@@ -1742,6 +1945,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 final_caption = f"🔗 Link: {text}"
             else:
                 final_caption = f"📹 Kod: {text}"
+        
+        # Caption text qo'shish
+        caption_text = get_caption_text()
+        if caption_text:
+            final_caption += f"\n\n{caption_text}"
         
         if is_premium:
             await update.message.reply_video(file_id, caption=final_caption)
