@@ -311,6 +311,108 @@ async def start_share_friend(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]])
     )
 
+# ---------- INLINE QUERY HANDLER ----------
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inline query handler - do'stlarga yuborish"""
+    query = update.inline_query
+    user_id = query.from_user.id
+    
+    # Foydalanuvchining oxirgi ko'rgan video kodini olish
+    last_code = context.user_data.get("last_video_code")
+    if not last_code:
+        # Agar last_code bo'lmasa, so'nggi 10 ta videoni ko'rsatish
+        films = fetch_all("SELECT code FROM films ORDER BY code LIMIT 10")
+        if not films:
+            return
+        
+        results = []
+        for film in films:
+            video_code = film[0]
+            
+            share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+            if video_code.startswith('http'):
+                share_text += f"🔗 Link: {video_code}\n"
+            else:
+                share_text += f"📹 Video kod: {video_code}\n"
+            share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+            share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
+            
+            keyboard = [
+                [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(video_code)}")]
+            ]
+            
+            results.append(
+                InlineQueryResultArticle(
+                    id=hashlib.md5(video_code.encode()).hexdigest()[:64],
+                    title=f"📹 Video: {video_code[:30]}{'...' if len(video_code) > 30 else ''}",
+                    description=f"Do'stingizga video yuboring - {video_code}",
+                    input_message_content=InputTextMessageContent(
+                        message_text=share_text
+                    ),
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            )
+        
+        await query.answer(results)
+        return
+    
+    # Agar last_code bo'lsa, faqat o'sha videoni ko'rsatish
+    result = fetch_one("SELECT file_id, extra_text FROM films WHERE code=%s" if DATABASE_URL else "SELECT file_id, extra_text FROM films WHERE code=?", (last_code,))
+    if not result:
+        return
+    
+    # Inline result yaratish
+    share_text = f"🎬 Do'stim sizga video yubordi!\n\n"
+    if last_code.startswith('http'):
+        share_text += f"🔗 Link: {last_code}\n"
+    else:
+        share_text += f"📹 Video kod: {last_code}\n"
+    share_text += f"🤖 Bot: {BOT_USERNAME}\n\n"
+    share_text += f"Video ni ko'rish uchun quyidagi tugmani bosing 👇"
+    
+    # Inline keyboard yaratish
+    keyboard = [
+        [InlineKeyboardButton("🎬 Videoni ko'rish", url=f"{BOT_LINK}?start={urllib.parse.quote(last_code)}")]
+    ]
+    
+    # Inline result
+    results = [
+        InlineQueryResultArticle(
+            id=hashlib.md5(last_code.encode()).hexdigest()[:64],
+            title="📤 Do'stingizga video yuboring",
+            description=f"Video: {last_code}",
+            input_message_content=InputTextMessageContent(
+                message_text=share_text
+            ),
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    ]
+    
+    await query.answer(results)
+
+async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tanlangan inline result - do'stga yuborilganda"""
+    chosen_result = update.chosen_inline_result
+    user_id = chosen_result.from_user.id
+    result_id = chosen_result.result_id
+    
+    # Foydalanuvchining oxirgi ko'rgan video kodini olish
+    last_code = context.user_data.get("last_video_code")
+    if last_code:
+        # Yuborilgan do'stlar sonini hisoblash
+        context.user_data.setdefault("shared_count", 0)
+        context.user_data["shared_count"] += 1
+        
+        # Foydalanuvchiga xabar berish
+        try:
+            await context.bot.send_message(
+                user_id,
+                f"✅ Video {last_code} do'stingizga yuborildi!\n"
+                f"Jami yuborilgan do'stlar: {context.user_data['shared_count']}"
+            )
+        except:
+            pass
+
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
