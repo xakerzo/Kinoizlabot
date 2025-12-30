@@ -10,7 +10,7 @@ import re
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = 1373647
-BOT_TOKEN = os.environ.get('BOT_TOKEN', "8505113284:AAFu0vhU6j7d4tsaY5Rsn1qga57THZt3pEo")
+BOT_TOKEN = os.environ.get('BOT_TOKEN', "8332135205:AAF2RbOWLE9elxsmFT9fh12IqYnjqPwwHrg")
 BOT_USERNAME = "@kinoni_izlabot"
 BOT_LINK = "https://t.me/kinoni_izlabot"
 
