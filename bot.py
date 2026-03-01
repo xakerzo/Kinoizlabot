@@ -38,7 +38,9 @@ OWNER_KEYBOARD = {
     ],
     "channel_actions": [
         [("➕ Kanal qo'shish", "owner_add_channel"), ("🔍 Kanallarni tekshirish", "owner_check_channels")],
-        [("🗑 Kanal o'chirish", "owner_delete_channel"), ("⬅️ Ortga", "owner_back")]
+        [("➕ Insta Link", "owner_add_insta"), ("🔍 Insta larni ko'rish", "owner_check_insta")],
+        [("🗑 Kanal o'chirish", "owner_delete_channel"), ("🗑 Insta o'chirish", "owner_delete_insta")],
+        [("⬅️ Ortga", "owner_back")]
     ],
     "video_caption_actions": [
         [("📝 Matn qo'shish", "owner_add_caption"), ("🔍 Matnni tekshirish", "owner_view_caption")],
@@ -174,6 +176,12 @@ if DATABASE_URL:
     """)
     
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS insta_links (
+            link TEXT PRIMARY KEY
+        )
+    """)
+    
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS premium_users (
             user_id BIGINT PRIMARY KEY,
             expiry_date TIMESTAMP,
@@ -285,6 +293,12 @@ else:
         CREATE TABLE IF NOT EXISTS partners (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             text TEXT NOT NULL
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS insta_links (
+            link TEXT PRIMARY KEY
         )
     """)
     
@@ -712,6 +726,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     for ch in not_subscribed:
                         keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
                     
+                    try:
+                        insta_links = fetch_all("SELECT link FROM insta_links")
+                        if insta_links:
+                            for i, link in enumerate(insta_links, 1):
+                                keyboard.append([InlineKeyboardButton(f"📷 Instagram profili {i}" if len(insta_links) > 1 else "📷 Bizning Instagram", url=link[0])])
+                    except:
+                        pass
+                    
                     safe_code = create_safe_callback_data(video_code)
                     keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
                     keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
@@ -864,6 +886,14 @@ Z.Yuldashev"""
             for ch in not_subscribed:
                 keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
             
+            try:
+                insta_links = fetch_all("SELECT link FROM insta_links")
+                if insta_links:
+                    for i, link in enumerate(insta_links, 1):
+                        keyboard.append([InlineKeyboardButton(f"📷 Instagram profili {i}" if len(insta_links) > 1 else "📷 Bizning Instagram", url=link[0])])
+            except:
+                pass
+            
             safe_code = create_safe_callback_data(code)
             keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
             keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
@@ -968,8 +998,34 @@ Z.Yuldashev"""
         await query.message.edit_text("🗑 O'chiriladigan kanal nomini yozing:", reply_markup=create_keyboard("channel_actions"))
         return
     
+    elif data == "owner_add_insta":
+        context.user_data.clear()
+        context.user_data["action"] = "add_insta"
+        await query.message.edit_text("➕ Instagram linkini yozing (masalan https://instagram.com/profil):", reply_markup=create_keyboard("channel_actions"))
+        return
+        
+    elif data == "owner_check_insta":
+        try:
+            insta_links = fetch_all("SELECT link FROM insta_links")
+            if insta_links:
+                text = "📷 Majburiy Instagram linklar:\n\n"
+                for i, c in enumerate(insta_links, 1):
+                    text += f"{i}. {c[0]}\n"
+                await query.message.edit_text(text, reply_markup=create_keyboard("channel_actions"))
+            else:
+                await query.message.edit_text("📭 Hali Instagram link qo'shilmagan.", reply_markup=create_keyboard("channel_actions"))
+        except:
+            pass
+        return
+        
+    elif data == "owner_delete_insta":
+        context.user_data.clear()
+        context.user_data["action"] = "delete_insta"
+        await query.message.edit_text("� O'chiriladigan Instagram linkini yozing:", reply_markup=create_keyboard("channel_actions"))
+        return
+    
     elif data == "owner_caption":
-        await query.message.edit_text("📝 Video ostidagi matn (videodan keyin chiqadigan matn):", reply_markup=create_keyboard("video_caption_actions"))
+        await query.message.edit_text("�📝 Video ostidagi matn (videodan keyin chiqadigan matn):", reply_markup=create_keyboard("video_caption_actions"))
         return
     
     elif data == "owner_add_caption":
@@ -1648,6 +1704,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Kanal o'chirildi: {text}")
             context.user_data.clear()
             return
+            
+        # Insta qo'shish
+        if action == "add_insta":
+            if DATABASE_URL:
+                execute_query("INSERT INTO insta_links (link) VALUES (%s) ON CONFLICT (link) DO NOTHING", (text,))
+            else:
+                execute_query("INSERT OR IGNORE INTO insta_links (link) VALUES (?)", (text,))
+            await update.message.reply_text(f"Instagram link qo'shildi: {text}")
+            context.user_data.clear()
+            return
+            
+        # Insta o'chirish
+        if action == "delete_insta":
+            execute_query("DELETE FROM insta_links WHERE link=%s" if DATABASE_URL else "DELETE FROM insta_links WHERE link=?", (text,))
+            await update.message.reply_text(f"Instagram link o'chirildi: {text}")
+            context.user_data.clear()
+            return
         
         # Broadcast tasdiqlash
         if action == "confirm_broadcast_photo":
@@ -1969,6 +2042,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = []
                 for ch in not_subscribed:
                     keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
+                
+                try:
+                    insta_links = fetch_all("SELECT link FROM insta_links")
+                    if insta_links:
+                        for i, link in enumerate(insta_links, 1):
+                            keyboard.append([InlineKeyboardButton(f"📷 Instagram profili {i}" if len(insta_links) > 1 else "📷 Bizning Instagram", url=link[0])])
+                except:
+                    pass
                 
                 safe_code = create_safe_callback_data(text)
                 keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data=f"check_subs_{safe_code}")])
