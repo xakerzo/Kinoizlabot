@@ -651,6 +651,25 @@ def get_original_code_from_callback(short_code):
     
     return short_code
 
+def is_verified_today(user_id):
+    """Kunlik obuna tekshiruvidan o'tganligini aniqlash"""
+    try:
+        today_str = datetime.utcnow().date().isoformat()
+        result = fetch_one("SELECT last_check_date FROM users WHERE user_id=%s" if DATABASE_URL else "SELECT last_check_date FROM users WHERE user_id=?", (user_id,))
+        if result and result[0] == today_str:
+            return True
+        return False
+    except:
+        return False
+
+def update_verified_today(user_id):
+    """Foydalanuvchining bugungi tekshiruvdan o'tganligini saqlash"""
+    try:
+        today_str = datetime.utcnow().date().isoformat()
+        execute_query("UPDATE users SET last_check_date=%s WHERE user_id=%s" if DATABASE_URL else "UPDATE users SET last_check_date=? WHERE user_id=?", (today_str, user_id))
+    except:
+        pass
+
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -721,9 +740,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except:
                         not_subscribed.append(c[0])
 
-                if not_subscribed:
+                if channels and (not_subscribed or not is_verified_today(user_id)):
                     keyboard = []
-                    for ch in not_subscribed:
+                    channels_to_show = not_subscribed if not_subscribed else [c[0] for c in channels]
+                    for ch in channels_to_show:
                         keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
                     
                     try:
@@ -743,6 +763,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
                 else:
+                    update_verified_today(user_id)
                     await update.message.reply_video(file_id, caption=final_caption)
                     await send_video_caption(update, context)
             
@@ -881,9 +902,10 @@ Z.Yuldashev"""
             except:
                 not_subscribed.append(c[0])
 
-        if not_subscribed:
+        if channels and not_subscribed:
             keyboard = []
-            for ch in not_subscribed:
+            channels_to_show = not_subscribed
+            for ch in channels_to_show:
                 keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
             
             try:
@@ -903,6 +925,7 @@ Z.Yuldashev"""
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
+            update_verified_today(user_id)
             update_video_stats(code)
             # YANGI: create_video_caption funksiyasidan foydalanish
             final_caption = create_video_caption(code, video_caption, is_premium=False)
@@ -2038,9 +2061,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except:
                     not_subscribed.append(c[0])
 
-            if not_subscribed:
+            if channels and (not_subscribed or not is_verified_today(user_id)):
                 keyboard = []
-                for ch in not_subscribed:
+                channels_to_show = not_subscribed if not_subscribed else [c[0] for c in channels]
+                for ch in channels_to_show:
                     keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
                 
                 try:
@@ -2060,6 +2084,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             else:
+                update_verified_today(user_id)
                 await update.message.reply_video(file_id, caption=final_caption)
                 await send_video_caption(update, context)
     else:
@@ -2235,6 +2260,15 @@ if __name__ == '__main__':
     
     # 1. Database jadvallarini tekshirish
     print("🔍 Database jadvallarini tekshirilmoqda...")
+    try:
+        if DATABASE_URL:
+            execute_query("ALTER TABLE users ADD COLUMN last_check_date VARCHAR(20) DEFAULT ''")
+        else:
+            execute_query("ALTER TABLE users ADD COLUMN last_check_date VARCHAR(20) DEFAULT ''")
+        print("✅ users jadvaliga last_check_date qo'shildi.")
+    except Exception:
+        pass # Allaqachon mavjud
+        
     try:
         update_total_videos_count()
         print("✅ Videolar soni yangilandi!")
