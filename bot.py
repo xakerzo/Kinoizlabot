@@ -743,14 +743,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if channels and (not_subscribed or not is_verified_today(user_id)):
                     keyboard = []
                     channels_to_show = not_subscribed if not_subscribed else [c[0] for c in channels]
+                    btn_number = 1
                     for ch in channels_to_show:
-                        keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
+                        keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=f"https://t.me/{ch[1:]}")])
+                        btn_number += 1
                     
                     try:
                         insta_links = fetch_all("SELECT link FROM insta_links")
                         if insta_links:
-                            for i, link in enumerate(insta_links, 1):
-                                keyboard.append([InlineKeyboardButton(f"📷 Instagram profili {i}" if len(insta_links) > 1 else "📷 Bizning Instagram", url=link[0])])
+                            for link in insta_links:
+                                keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=link[0])])
+                                btn_number += 1
                     except:
                         pass
                     
@@ -905,14 +908,17 @@ Z.Yuldashev"""
         if channels and not_subscribed:
             keyboard = []
             channels_to_show = not_subscribed
+            btn_number = 1
             for ch in channels_to_show:
-                keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
+                keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=f"https://t.me/{ch[1:]}")])
+                btn_number += 1
             
             try:
                 insta_links = fetch_all("SELECT link FROM insta_links")
                 if insta_links:
-                    for i, link in enumerate(insta_links, 1):
-                        keyboard.append([InlineKeyboardButton(f"📷 Instagram profili {i}" if len(insta_links) > 1 else "📷 Bizning Instagram", url=link[0])])
+                    for link in insta_links:
+                        keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=link[0])])
+                        btn_number += 1
             except:
                 pass
             
@@ -2064,14 +2070,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if channels and (not_subscribed or not is_verified_today(user_id)):
                 keyboard = []
                 channels_to_show = not_subscribed if not_subscribed else [c[0] for c in channels]
+                btn_number = 1
                 for ch in channels_to_show:
-                    keyboard.append([InlineKeyboardButton(f"✅ Obuna bo'lish: {ch}", url=f"https://t.me/{ch[1:]}")])
+                    keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=f"https://t.me/{ch[1:]}")])
+                    btn_number += 1
                 
                 try:
                     insta_links = fetch_all("SELECT link FROM insta_links")
                     if insta_links:
-                        for i, link in enumerate(insta_links, 1):
-                            keyboard.append([InlineKeyboardButton(f"📷 Instagram profili {i}" if len(insta_links) > 1 else "📷 Bizning Instagram", url=link[0])])
+                        for link in insta_links:
+                            keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=link[0])])
+                            btn_number += 1
                 except:
                     pass
                 
