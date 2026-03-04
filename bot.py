@@ -582,6 +582,15 @@ def get_premium_text():
     result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
     return result
 
+def get_share_keyboard(video_code):
+    """Do'stlarga yuborish tugmasi va havolasini yaratish"""
+    safe_code = urllib.parse.quote(video_code)
+    share_url = f"https://t.me/share/url?url={BOT_LINK}?start={safe_code}"
+    keyboard = [
+        [InlineKeyboardButton("👥 Ulashish", url=share_url)]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # ---------- VIDEO OSTIDAGI MATN FUNKSIYALARI ----------
 async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE, video_code=None):
     """Video dan keyin matn yuborish - BOT USERNAME CHIQMASIN"""
@@ -598,23 +607,7 @@ async def send_video_caption(update: Update, context: ContextTypes.DEFAULT_TYPE,
         # YANGI: Bot nomini QO'SHMAYMIZ
         if caption_result and caption_result[0]:
             full_text = caption_result[0]
-            
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await update.message.reply_text(
-                full_text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            # Agar caption bo'lmasa, faqat tugma chiqsin
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await update.message.reply_text(
-                "Do'stlaringiz bilan ulashing:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await update.message.reply_text(full_text)
     except Exception as e:
         print(f"Matn yuborishda xatolik: {e}")
 
@@ -633,23 +626,7 @@ async def send_callback_caption(query, context: ContextTypes.DEFAULT_TYPE, video
         # YANGI: Bot nomini QO'SHMAYMIZ
         if caption_result and caption_result[0]:
             full_text = caption_result[0]
-            
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await query.message.reply_text(
-                full_text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
-            # Agar caption bo'lmasa, faqat tugma chiqsin
-            keyboard = [
-                [InlineKeyboardButton("👥 Do'stlarga yuborish", callback_data="share_friend")]
-            ]
-            await query.message.reply_text(
-                "Do'stlaringiz bilan ulashing:",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await query.message.reply_text(full_text)
     except Exception as e:
         print(f"Callback matn yuborishda xatolik: {e}")
 
@@ -726,7 +703,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Yangi: create_video_caption funksiyasidan foydalanish
                 final_caption = create_video_caption(video_code, video_caption, is_premium=True)
                 
-                await update.message.reply_video(file_id, caption=final_caption)
+                await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(video_code))
                 await send_video_caption(update, context)
                 return
             else:
@@ -755,7 +732,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_caption = create_video_caption(video_code, video_caption, is_premium=False)
             
             if is_premium:
-                await update.message.reply_video(file_id, caption=final_caption)
+                await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(video_code))
                 await send_video_caption(update, context)
                 return
             else:
@@ -796,7 +773,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 else:
                     update_verified_today(user_id)
-                    await update.message.reply_video(file_id, caption=final_caption)
+                    await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(video_code))
                     await send_video_caption(update, context)
             
             return
@@ -949,7 +926,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # YANGI: create_video_caption funksiyasidan foydalanish
                 final_caption = create_video_caption(code, video_caption, is_premium=False)
                 
-                await query.message.reply_video(file_id, caption=final_caption)
+                await query.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(code))
                 context.user_data["last_video_code"] = code
                 await send_callback_caption(query, context)
             return
@@ -1002,7 +979,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # YANGI: create_video_caption funksiyasidan foydalanish
             final_caption = create_video_caption(code, video_caption, is_premium=False)
             
-            await query.message.reply_video(file_id, caption=final_caption)
+            await query.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(code))
             context.user_data["last_video_code"] = code
             await send_callback_caption(query, context)
         return
@@ -2146,7 +2123,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # YANGI: create_video_caption funksiyasidan foydalanish
             final_caption = create_video_caption(text, video_caption, is_premium=True)
             
-            await update.message.reply_video(file_id, caption=final_caption)
+            await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(text))
             await send_video_caption(update, context)
             return
         else:
@@ -2183,7 +2160,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_caption = create_video_caption(text, video_caption, is_premium=False)
         
         if is_premium:
-            await update.message.reply_video(file_id, caption=final_caption)
+            await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(text))
             await send_video_caption(update, context)
             return
         else:
@@ -2224,7 +2201,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 update_verified_today(user_id)
-                await update.message.reply_video(file_id, caption=final_caption)
+                await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(text))
                 await send_video_caption(update, context)
     else:
         await update.message.reply_text("Bunday kod/linkka film topilmadi! Iltimos, to'g'ri kod yoki linkni yuboring.")
