@@ -883,7 +883,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount = price
         merchant_id = CLICK_MERCHANT_ID
         service_id = CLICK_SERVICE_ID
-        transaction_param = f"{user_id}_{tariff_id}"
+        
+        # Obonent ID si xar safar o'zgarishi uchun timestamp qoshamiz. Masalan: 1373647_1_17203...
+        unique_time = int(datetime.now().timestamp())
+        transaction_param = f"{user_id}_{tariff_id}_{unique_time}"
         
         click_app_url = f"https://my.click.uz/services/pay?service_id={service_id}&merchant_id={merchant_id}&amount={amount}&transaction_param={transaction_param}"
         
@@ -2495,8 +2498,9 @@ def click_complete():
         
     if error_code == "0":
         try:
+            # merchant_trans_id 3 ta qismdan iborat bo'lishi mumkin: user_id _ tariff_id _ timestamp
             parts = merchant_trans_id.split("_")
-            if len(parts) == 2:
+            if len(parts) >= 2:
                 user_id = int(parts[0])
                 tariff_id = int(parts[1])
                 tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
