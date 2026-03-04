@@ -10,11 +10,12 @@ import hashlib
 import re
 
 # ---------- TOKEN VA OWNER ----------
-OWNER_ID = 1373647
-BOT_TOKEN = os.environ.get('BOT_TOKEN', "8332135205:AAF2RbOWLE9elxsmFT9fh12IqYnjqPwwHrg")
+OWNER_ID = int(os.environ.get('OWNER_ID', '1373647'))
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 BOT_USERNAME = "@kinoni_izlabot"
 BOT_LINK = "https://t.me/kinoni_izlabot"
-CLICK_TOKEN = os.environ.get('CLICK_TOKEN', "398062629:TEST:999999999_CHAT_ID:1234")  # CLICK provider token
+CLICK_TOKEN = os.environ.get('CLICK_TOKEN')  # CLICK provider token
+
 
 # ---------- YANGI OWNER TUGMA TIZIMI ----------
 OWNER_KEYBOARD = {
