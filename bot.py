@@ -1,5 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, InlineQueryHandler, ChosenInlineResultHandler, PreCheckoutQueryHandler
+from telegram.error import BadRequest
 import urllib.parse
 import os
 import psycopg2
@@ -1332,30 +1333,42 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     # ---------- TARIFLAR BOSHQARISH ----------
     elif data == "owner_tariffs":
-        await query.message.edit_text("💳 Tariflar rejasi:", reply_markup=create_keyboard("tariff_actions"))
+        try:
+            await query.message.edit_text("💳 Tariflar rejasi:", reply_markup=create_keyboard("tariff_actions"))
+        except BadRequest:
+            pass
         return
         
     elif data == "owner_add_tariff":
         context.user_data.clear()
         context.user_data["action"] = "add_tariff"
-        await query.message.edit_text("➕ Tarif qo'shish uchun narxi va kunini bo'sh joy bilan yozing.\nMasalan: 5000 3 (5000 so'm, 3 kun):", reply_markup=create_keyboard("tariff_actions"))
+        try:
+            await query.message.edit_text("➕ Tarif qo'shish uchun narxi va kunini bo'sh joy bilan yozing.\nMasalan: 5000 3 (5000 so'm, 3 kun):", reply_markup=create_keyboard("tariff_actions"))
+        except BadRequest:
+            pass
         return
         
     elif data == "owner_view_tariffs":
         tariffs = fetch_all("SELECT id, price, days FROM tariffs ORDER BY days ASC")
+        text = "💳 Mavjud tariflar:\n\n"
         if tariffs:
-            text = "💳 Mavjud tariflar:\n\n"
             for t in tariffs:
                 text += f"ID: {t[0]} | Summa: {t[1]} so'm | {t[2]} kun\n"
-            await query.message.edit_text(text, reply_markup=create_keyboard("tariff_actions"))
         else:
-            await query.message.edit_text("📭 Hali tariflar qo'shilmagan.", reply_markup=create_keyboard("tariff_actions"))
+            text = "📭 Hali tariflar qo'shilmagan."
+        try:
+            await query.message.edit_text(text, reply_markup=create_keyboard("tariff_actions"))
+        except BadRequest:
+            pass
         return
         
     elif data == "owner_delete_tariff":
         context.user_data.clear()
         context.user_data["action"] = "delete_tariff"
-        await query.message.edit_text("🗑 O'chiriladigan tarif ID sini yozing:", reply_markup=create_keyboard("tariff_actions"))
+        try:
+            await query.message.edit_text("🗑 O'chiriladigan tarif ID sini yozing:", reply_markup=create_keyboard("tariff_actions"))
+        except BadRequest:
+            pass
         return
         
     # ---------- VIDEO EDIT TUGMALARI ----------
