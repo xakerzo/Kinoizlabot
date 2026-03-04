@@ -1,5 +1,5 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, InlineQueryHandler, ChosenInlineResultHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, InlineQueryHandler, ChosenInlineResultHandler, PreCheckoutQueryHandler
 import urllib.parse
 import os
 import psycopg2
@@ -13,6 +13,7 @@ OWNER_ID = 1373647
 BOT_TOKEN = os.environ.get('BOT_TOKEN', "8332135205:AAF2RbOWLE9elxsmFT9fh12IqYnjqPwwHrg")
 BOT_USERNAME = "@kinoni_izlabot"
 BOT_LINK = "https://t.me/kinoni_izlabot"
+CLICK_TOKEN = os.environ.get('CLICK_TOKEN', "398062629:TEST:999999999_CHAT_ID:1234")  # CLICK provider token
 
 # ---------- YANGI OWNER TUGMA TIZIMI ----------
 OWNER_KEYBOARD = {
@@ -22,7 +23,8 @@ OWNER_KEYBOARD = {
         [("📺 Majburiy kanal", "owner_channels"), ("📝 Video ostidagi matn", "owner_caption")],
         [("🔤 Startdagi xabar", "owner_start"), ("⭐ Premium matn", "owner_premium_text")],
         [("📝 Caption matn", "owner_caption_text"), ("🎫 Premium boshqaruv", "owner_premium_mgmt")],  # YANGI TUGMA
-        [("📊 Statistika", "owner_stats"), ("👥 Bot foydalanuvchilar", "owner_users")]
+        [("📊 Statistika", "owner_stats"), ("👥 Bot foydalanuvchilar", "owner_users")],
+        [("💳 Tariflar rejasi", "owner_tariffs")]
     ],
     "video_actions": [
         [("📤 Video yuklash", "owner_upload"), ("🔍 Video qidirish", "owner_search")],
@@ -71,6 +73,10 @@ OWNER_KEYBOARD = {
     "caption_text_actions": [
         [("➕ Qo'shish", "owner_add_caption_text"), ("✏️ Tahrirlash", "owner_edit_caption_text")],
         [("🗑 O'chirish", "owner_delete_caption_text"), ("⬅️ Ortga", "owner_back")]
+    ],
+    "tariff_actions": [
+        [("➕ Tarif qo'shish", "owner_add_tariff"), ("🔍 Tariflarni ko'rish", "owner_view_tariffs")],
+        [("🗑 Tarifni o'chirish", "owner_delete_tariff"), ("⬅️ Ortga", "owner_back")]
     ]
 }
 
@@ -262,6 +268,14 @@ if DATABASE_URL:
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tariffs (
+            id SERIAL PRIMARY KEY,
+            price INTEGER NOT NULL,
+            days INTEGER NOT NULL
+        )
+    """)
+    
 else:
     # Lokal SQLite uchun
     import sqlite3
@@ -379,6 +393,14 @@ else:
         CREATE TABLE IF NOT EXISTS caption_texts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             text TEXT NOT NULL
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tariffs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            price INTEGER NOT NULL,
+            days INTEGER NOT NULL
         )
     """)
 
@@ -816,39 +838,72 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ---------- REKLAMA BYPASS TUGMASI ----------
     if data == "bypass_ads":
-        # YANGI: premium_texts dan o'qish (ad_texts emas)
-        premium_result = get_premium_text()
+        tariffs = fetch_all("SELECT id, price, days FROM tariffs ORDER BY days ASC")
+        if tariffs:
+            keyboard = []
+            for t in tariffs:
+                keyboard.append([InlineKeyboardButton(f"💳 {t[1]} so'm - {t[2]} kun", callback_data=f"select_tariff_{t[0]}")])
+            await query.message.reply_text("Obuna tariflaridan birini tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await query.message.reply_text("📭 Hozircha tariflar kiritilmagan. Iltimos adminga murojaat qiling.")
+        return
+
+    elif data.startswith("select_tariff_"):
+        tariff_id = data.split("_")[2]
+        tariff = fetch_one("SELECT price, days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT price, days FROM tariffs WHERE id=?", (int(tariff_id),))
+        if not tariff:
+            await query.message.reply_text("Tarif topilmadi.")
+            return
+        price, days = tariff
         
+        keyboard = [
+            [InlineKeyboardButton("💳 Click Avtomat", callback_data=f"click_auto_{tariff_id}")],
+            [InlineKeyboardButton("💵 Karta raqam orqali", callback_data=f"click_manual_{tariff_id}")]
+        ]
+        await query.message.reply_text(
+            f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lov usulini tanlang:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    elif data.startswith("click_auto_"):
+        tariff_id = data.split("_")[2]
+        tariff = fetch_one("SELECT price, days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT price, days FROM tariffs WHERE id=?", (int(tariff_id),))
+        if not tariff:
+            return
+        price, days = tariff
+        
+        payload = f"premium_{user_id}_{tariff_id}_{int(datetime.now().timestamp())}"
+        try:
+            await context.bot.send_invoice(
+                chat_id=query.message.chat_id,
+                title=f"Premium obuna ({days} kun)",
+                description=f"Bot uchun reklamasiz {days} kunlik premium obuna",
+                payload=payload,
+                provider_token=CLICK_TOKEN,
+                currency="UZS",
+                prices=[LabeledPrice(label=f"{days} kun", amount=price * 100)]
+            )
+        except Exception as e:
+            await query.message.reply_text(f"❌ To'lov tizimiga ulanishda xatolik! Click token noto'g'ri bo'lishi mumkin.\nAdmin xabari: {e}")
+        return
+
+    elif data.startswith("click_manual_"):
+        # Eski holat
+        premium_result = get_premium_text()
         if premium_result:
             premium_text, photo_id, caption = premium_result
             if photo_id:
-                # Rasm bilan premium matn
-                await query.message.reply_photo(photo_id, caption=caption)
+                keyboard = [[InlineKeyboardButton("📨 Chekni yuborish", callback_data="send_receipt")]]
+                await query.message.reply_photo(photo_id, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             elif premium_text:
-                # Faqat matn
                 ad_message = premium_text
             else:
-                # Agar matn bo'lmasa, default matn
-                ad_message = """PREMIUM OBUNA
-
-3   KUNLIK - 5.000 SO'M
-10 KUNLIK - 10.000 SO'M
-30 KUNLIK - 20.000 SO'M
-
-9860100125862977
-Z.Yuldashev"""
+                ad_message = "PREMIUM OBUNA\n\n9860100125862977\nZ.Yuldashev"
         else:
-            # Default reklama matni
-            ad_message = """PREMIUM OBUNA
-
-3   KUNLIK - 5.000 SO'M
-10 KUNLIK - 10.000 SO'M
-30 KUNLIK - 20.000 SO'M
-
-9860100125862977
-Z.Yuldashev"""
-        
+            ad_message = "PREMIUM OBUNA\n\n9860100125862977\nZ.Yuldashev"
+            
         keyboard = [
             [InlineKeyboardButton("📨 Chekni yuborish", callback_data="send_receipt")]
         ]
@@ -1274,7 +1329,35 @@ Z.Yuldashev"""
         execute_query("DELETE FROM ad_texts")
         await query.message.edit_text("✅ Reklama matn o'chirildi!", reply_markup=create_keyboard("ad_text_actions"))
         return
-    
+        
+    # ---------- TARIFLAR BOSHQARISH ----------
+    elif data == "owner_tariffs":
+        await query.message.edit_text("💳 Tariflar rejasi:", reply_markup=create_keyboard("tariff_actions"))
+        return
+        
+    elif data == "owner_add_tariff":
+        context.user_data.clear()
+        context.user_data["action"] = "add_tariff"
+        await query.message.edit_text("➕ Tarif qo'shish uchun narxi va kunini bo'sh joy bilan yozing.\nMasalan: 5000 3 (5000 so'm, 3 kun):", reply_markup=create_keyboard("tariff_actions"))
+        return
+        
+    elif data == "owner_view_tariffs":
+        tariffs = fetch_all("SELECT id, price, days FROM tariffs ORDER BY days ASC")
+        if tariffs:
+            text = "💳 Mavjud tariflar:\n\n"
+            for t in tariffs:
+                text += f"ID: {t[0]} | Summa: {t[1]} so'm | {t[2]} kun\n"
+            await query.message.edit_text(text, reply_markup=create_keyboard("tariff_actions"))
+        else:
+            await query.message.edit_text("📭 Hali tariflar qo'shilmagan.", reply_markup=create_keyboard("tariff_actions"))
+        return
+        
+    elif data == "owner_delete_tariff":
+        context.user_data.clear()
+        context.user_data["action"] = "delete_tariff"
+        await query.message.edit_text("🗑 O'chiriladigan tarif ID sini yozing:", reply_markup=create_keyboard("tariff_actions"))
+        return
+        
     # ---------- VIDEO EDIT TUGMALARI ----------
     elif data.startswith("update_"):
         short_code = data.split("_")[1]
@@ -1565,6 +1648,30 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "add_ad_text":
             execute_query("INSERT INTO ad_texts (text) VALUES (%s)" if DATABASE_URL else "INSERT INTO ad_texts (text) VALUES (?)", (text,))
             await update.message.reply_text("✅ Reklama matni saqlandi! Endi 'Reklama siz ishlatish' tugmasida bu matn ko'rinadi.")
+            context.user_data.clear()
+            return
+        
+        # Tarif qo'shish
+        elif action == "add_tariff":
+            parts = text.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                price = int(parts[0])
+                days = int(parts[1])
+                execute_query("INSERT INTO tariffs (price, days) VALUES (%s, %s)" if DATABASE_URL else "INSERT INTO tariffs (price, days) VALUES (?, ?)", (price, days))
+                await update.message.reply_text("✅ Tarif muvaffaqiyatli saqlandi!")
+            else:
+                await update.message.reply_text("❌ Xato format! Iltimos, narx va kunni bo'sh joy bilan yozing.\nMasalan: 5000 3")
+            context.user_data.clear()
+            return
+            
+        # Tarif o'chirish
+        elif action == "delete_tariff":
+            if text.isdigit():
+                tariff_id = int(text)
+                execute_query("DELETE FROM tariffs WHERE id=%s" if DATABASE_URL else "DELETE FROM tariffs WHERE id=?", (tariff_id,))
+                await update.message.reply_text("✅ Tarif o'chirildi!")
+            else:
+                await update.message.reply_text("❌ Xato! ID faqat raqamlardan iborat bo'lishi kerak.")
             context.user_data.clear()
             return
         
@@ -2251,6 +2358,47 @@ async def owner_start_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_text("👑 Owner paneli:", reply_markup=create_keyboard("main"))
 
+# ---------- TO'LOV HANDLERLARI ----------
+async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Click orqali to'lovni tasdiqlash uchun"""
+    query = update.pre_checkout_query
+    if query.invoice_payload.startswith("premium_"):
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Xato to'lov identifikatori!")
+
+async def successful_payment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """To'lov muvaffaqiyatli bo'lsa mantiq"""
+    payment = update.message.successful_payment
+    payload = payment.invoice_payload
+    # payload formati: premium_{user_id}_{tariff_id}_{timestamp}
+    if payload.startswith("premium_"):
+        parts = payload.split("_")
+        user_id = int(parts[1])
+        tariff_id = int(parts[2])
+        
+        tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
+        if tariff:
+            days = tariff[0]
+            expiry_date = datetime.now() + timedelta(days=days)
+            
+            if DATABASE_URL:
+                execute_query("""
+                    INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET 
+                    expiry_date = EXCLUDED.expiry_date,
+                    approved_date = EXCLUDED.approved_date
+                """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+            else:
+                execute_query("""
+                    INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                
+            await update.message.reply_text(f"🎉 To'lov muvaffaqiyatli amalga oshirildi!\nSizga {days} kunlik reklamasiz (premium) tarif faollashtirildi.")
+
+
 # ---------- APPLICATION ----------
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
@@ -2262,6 +2410,8 @@ app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(InlineQueryHandler(handle_inline_query))
 app.add_handler(ChosenInlineResultHandler(handle_chosen_inline_result))
+app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
 
 # ---------- BOT ISHGA TUSHGANDA ----------
 if __name__ == '__main__':
