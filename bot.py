@@ -8,14 +8,19 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta
 import hashlib
 import re
+import threading
+from flask import Flask, request, jsonify
+import requests
 
 # ---------- TOKEN VA OWNER ----------
 OWNER_ID = int(os.environ.get('OWNER_ID', '1373647'))
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 BOT_USERNAME = "@kinoni_izlabot"
 BOT_LINK = "https://t.me/kinoni_izlabot"
-CLICK_TOKEN = os.environ.get('CLICK_TOKEN')  # CLICK provider token
 
+CLICK_MERCHANT_ID = os.environ.get('CLICK_MERCHANT_ID')
+CLICK_SERVICE_ID = os.environ.get('CLICK_SERVICE_ID')
+CLICK_SECRET_KEY = os.environ.get('CLICK_SECRET_KEY')
 
 # ---------- YANGI OWNER TUGMA TIZIMI ----------
 OWNER_KEYBOARD = {
@@ -875,19 +880,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         price, days = tariff
         
-        payload = f"premium_{user_id}_{tariff_id}_{int(datetime.now().timestamp())}"
-        try:
-            await context.bot.send_invoice(
-                chat_id=query.message.chat_id,
-                title=f"Premium obuna ({days} kun)",
-                description=f"Bot uchun reklamasiz {days} kunlik premium obuna",
-                payload=payload,
-                provider_token=CLICK_TOKEN,
-                currency="UZS",
-                prices=[LabeledPrice(label=f"{days} kun", amount=price * 100)]
-            )
-        except Exception as e:
-            await query.message.reply_text(f"❌ To'lov tizimiga ulanishda xatolik! Click token noto'g'ri bo'lishi mumkin.\nAdmin xabari: {e}")
+        amount = price
+        merchant_id = CLICK_MERCHANT_ID
+        service_id = CLICK_SERVICE_ID
+        transaction_param = f"{user_id}_{tariff_id}"
+        
+        click_app_url = f"https://my.click.uz/services/pay?service_id={service_id}&merchant_id={merchant_id}&amount={amount}&transaction_param={transaction_param}"
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 Click orqali to'lash", url=click_app_url)]
+        ]
+        await query.message.reply_text(
+            f"Click ilovasida to'lovni tasdiqlang va keyin yana botga qaytib /start bosing.\nTo'lash uchun tugmani bosing 👇",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
 
     elif data.startswith("click_manual_"):
@@ -2427,9 +2433,118 @@ app.add_handler(ChosenInlineResultHandler(handle_chosen_inline_result))
 app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
 app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
 
+# ---------- CLICK MERCHANT WEBHOOK (FLASK) ----------
+web_app = Flask(__name__)
+
+def md5_hash(text):
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+@web_app.route("/click/prepare", methods=["POST"])
+def click_prepare():
+    data = request.form
+    click_trans_id = data.get("click_trans_id", "")
+    service_id = data.get("service_id", "")
+    merchant_trans_id = data.get("merchant_trans_id", "")
+    amount = data.get("amount", "")
+    action = data.get("action", "")
+    sign_time = data.get("sign_time", "")
+    sign_string = data.get("sign_string", "")
+    
+    # MD5 HASH TEKSHIRISH
+    check_string = f"{click_trans_id}{service_id}{CLICK_SECRET_KEY}{merchant_trans_id}{amount}{action}{sign_time}"
+    my_sign = md5_hash(check_string)
+    
+    if my_sign != sign_string:
+        return jsonify({"error": -1, "error_note": "Sign check failed"})
+        
+    return jsonify({
+        "click_trans_id": int(click_trans_id),
+        "merchant_trans_id": merchant_trans_id,
+        "merchant_prepare_id": click_trans_id,
+        "error": 0,
+        "error_note": "Success"
+    })
+
+@web_app.route("/click/complete", methods=["POST"])
+def click_complete():
+    data = request.form
+    click_trans_id = data.get("click_trans_id", "")
+    service_id = data.get("service_id", "")
+    merchant_trans_id = data.get("merchant_trans_id", "")
+    merchant_prepare_id = data.get("merchant_prepare_id", "")
+    amount = data.get("amount", "")
+    action = data.get("action", "")
+    sign_time = data.get("sign_time", "")
+    sign_string = data.get("sign_string", "")
+    error_code = data.get("error", "0")
+    
+    check_string = f"{click_trans_id}{service_id}{CLICK_SECRET_KEY}{merchant_trans_id}{merchant_prepare_id}{amount}{action}{sign_time}"
+    my_sign = md5_hash(check_string)
+    
+    if my_sign != sign_string:
+        return jsonify({"error": -1, "error_note": "Sign check failed"})
+        
+    if error_code == "-5017":
+        return jsonify({
+            "click_trans_id": int(click_trans_id),
+            "merchant_trans_id": merchant_trans_id,
+            "merchant_confirm_id": click_trans_id,
+            "error": -9,
+            "error_note": "Transaction cancelled"
+        })
+        
+    if error_code == "0":
+        try:
+            parts = merchant_trans_id.split("_")
+            if len(parts) == 2:
+                user_id = int(parts[0])
+                tariff_id = int(parts[1])
+                tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
+                
+                if tariff:
+                    days = tariff[0]
+                    expiry_date = datetime.now() + timedelta(days=days)
+                    
+                    if DATABASE_URL:
+                        execute_query("""
+                            INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (user_id) DO UPDATE SET 
+                            expiry_date = EXCLUDED.expiry_date,
+                            approved_date = EXCLUDED.approved_date
+                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                    else:
+                        execute_query("""
+                            INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                            VALUES (?, ?, ?, ?)
+                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                        
+                    # Foydalanuvchiga muvaffaqiyat haqida xabar yozish
+                    requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga obuna tarifingiz yoqildi, endi cheklovlarsiz ishlatishingiz mumkin.")
+        except Exception as e:
+            print("❌ Click complete update error:", e)
+    
+    return jsonify({
+        "click_trans_id": int(click_trans_id),
+        "merchant_trans_id": merchant_trans_id,
+        "merchant_confirm_id": click_trans_id,
+        "error": 0,
+        "error_note": "Success"
+    })
+
+def run_flask_app():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port, use_reloader=False)
+
 # ---------- BOT ISHGA TUSHGANDA ----------
 if __name__ == '__main__':
     print("🤖 Bot ishga tushmoqda...")
+    
+    # 1. Flask serverini background (orqa fonga) ishga tushirish
+    flask_thread = threading.Thread(target=run_flask_app, daemon=True)
+    flask_thread.start()
+    print("🕸 Webhook server (Flask) ishga tushdi...")
+
     
     # 1. Database jadvallarini tekshirish
     print("🔍 Database jadvallarini tekshirilmoqda...")
