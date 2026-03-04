@@ -862,12 +862,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Tarif topilmadi.")
             return
         price, days = tariff
-        
         keyboard = [
             [InlineKeyboardButton("💳 Click Avtomat", callback_data=f"click_auto_{tariff_id}")],
             [InlineKeyboardButton("💵 Karta raqam orqali", callback_data=f"click_manual_{tariff_id}")]
         ]
         await query.message.reply_text(
+            f"⚠️ CLICK tizimi orqali to'lovlar avtomatlashtirilgan bo'lib, to'lov amalga oshishi bilanoq obuna ishga tushadi. Boshqa ilovalar orqali qilingan to'lovlar esa, admin tomonidan tekshirilib so'ngra tasdiqlanadi.\n\n"
             f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lov usulini tanlang:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -891,7 +891,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💳 Click orqali to'lash", url=click_app_url)]
         ]
         await query.message.reply_text(
-            f"Click ilovasida to'lovni tasdiqlang va keyin yana botga qaytib /start bosing.\nTo'lash uchun tugmani bosing 👇",
+            f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lash uchun tugmani bosing 👇",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
