@@ -2422,6 +2422,8 @@ def md5_hash(text):
 @web_app.route("/click/prepare", methods=["POST"])
 def click_prepare():
     data = request.form
+    print(f"📥 CLICK PREPARE KELDI: {dict(data)}")
+    
     click_trans_id = data.get("click_trans_id", "")
     service_id = data.get("service_id", "")
     merchant_trans_id = data.get("merchant_trans_id", "")
@@ -2435,12 +2437,14 @@ def click_prepare():
     my_sign = md5_hash(check_string)
     
     if my_sign != sign_string:
+        print(f"❌ SIGN XATO! Bizniki: {my_sign}, Clickniki: {sign_string}\nMatn: {check_string}")
         return jsonify({"error": -1, "error_note": "Sign check failed"})
         
+    print(f"✅ PREPARE SUCCESS, trans_id: {merchant_trans_id}")
     return jsonify({
         "click_trans_id": int(click_trans_id),
         "merchant_trans_id": merchant_trans_id,
-        "merchant_prepare_id": click_trans_id,
+        "merchant_prepare_id": int(click_trans_id),
         "error": 0,
         "error_note": "Success"
     })
@@ -2448,6 +2452,8 @@ def click_prepare():
 @web_app.route("/click/complete", methods=["POST"])
 def click_complete():
     data = request.form
+    print(f"📥 CLICK COMPLETE KELDI: {dict(data)}")
+    
     click_trans_id = data.get("click_trans_id", "")
     service_id = data.get("service_id", "")
     merchant_trans_id = data.get("merchant_trans_id", "")
@@ -2462,18 +2468,20 @@ def click_complete():
     my_sign = md5_hash(check_string)
     
     if my_sign != sign_string:
+        print(f"❌ COMPLETE SIGN XATO! Bizniki: {my_sign}, Clickniki: {sign_string}\nMatn: {check_string}")
         return jsonify({"error": -1, "error_note": "Sign check failed"})
         
-    if error_code == "-5017":
+    if str(error_code) != "0":
+        print(f"⚠️ COMPLETE XATOLIK: {error_code}")
         return jsonify({
             "click_trans_id": int(click_trans_id),
             "merchant_trans_id": merchant_trans_id,
-            "merchant_confirm_id": click_trans_id,
+            "merchant_confirm_id": int(click_trans_id),
             "error": -9,
             "error_note": "Transaction cancelled"
         })
         
-    if error_code == "0":
+    if str(error_code) == "0":
         try:
             # merchant_trans_id 3 ta qismdan iborat bo'lishi mumkin: user_id _ tariff_id _ timestamp
             parts = merchant_trans_id.split("_")
@@ -2502,13 +2510,14 @@ def click_complete():
                         
                     # Foydalanuvchiga muvaffaqiyat haqida xabar yozish
                     requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga obuna tarifingiz yoqildi, endi cheklovlarsiz ishlatishingiz mumkin.")
+                    print(f"✅ COMPLETE Muvaffaqiyatli: {user_id} unga {days} kun berildi")
         except Exception as e:
             print("❌ Click complete update error:", e)
     
     return jsonify({
         "click_trans_id": int(click_trans_id),
         "merchant_trans_id": merchant_trans_id,
-        "merchant_confirm_id": click_trans_id,
+        "merchant_confirm_id": int(click_trans_id),
         "error": 0,
         "error_note": "Success"
     })
