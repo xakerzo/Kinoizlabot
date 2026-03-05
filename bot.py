@@ -2350,6 +2350,46 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("Xatolik! User ID va kunlar sonini to'g'ri kiriting.")
 
+async def profil_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User profile ko'rish command"""
+    user_id = update.message.from_user.id
+    username = update.message.from_user.username
+    user_display = f"@{username}" if username else str(user_id)
+    
+    # Premium tekshirish
+    result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
+    
+    if result:
+        expiry_date = result[0]
+        if isinstance(expiry_date, str):
+            expiry_date = datetime.fromisoformat(expiry_date)
+            
+        if expiry_date > datetime.now():
+            days_left = (expiry_date - datetime.now()).days
+            
+            keyboard = [[InlineKeyboardButton("🎫 Obunani uzaytirish (Tariflar)", callback_data="bypass_ads")]]
+            await update.message.reply_text(
+                f"👤 <b>Foydalanuvchi:</b> {user_display}\n"
+                f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
+                f"🌟 <b>Status:</b> Premium (Faol)\n"
+                f"⏳ <b>Qolgan vaqt:</b> {days_left} kun\n"
+                f"📅 <b>Tugash sanasi:</b> {expiry_date.strftime('%Y-%m-%d %H:%M')}",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+            
+    # Premium emas yoki tugagan
+    keyboard = [[InlineKeyboardButton("🎫 Obuna sotib olish", callback_data="bypass_ads")]]
+    await update.message.reply_text(
+        f"👤 <b>Foydalanuvchi:</b> {user_display}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
+        f"⚪ <b>Status:</b> Oddiy (Premium emas)\n\n"
+        f"<i>Premium obuna sotib olib kanallarga a'zo bo'lish bekor qilinadi va maxsus seriallarni ko'rish imkoniyati ochiladi!</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
 # ---------- OWNER PANELINI YANGILASH ----------
 async def owner_start_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Owner uchun start command"""
@@ -2403,6 +2443,8 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
 app = Application.builder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("premium", premium_command))
+app.add_handler(CommandHandler("profil", profil_command))
+app.add_handler(CommandHandler("profile", profil_command))
 app.add_handler(CommandHandler("owner", owner_start_message))
 app.add_handler(CallbackQueryHandler(callback_handler))
 app.add_handler(MessageHandler(filters.VIDEO, handle_owner_video))
@@ -2510,6 +2552,18 @@ def click_complete():
                         
                     # Foydalanuvchiga muvaffaqiyat haqida xabar yozish
                     requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga obuna tarifingiz yoqildi, endi cheklovlarsiz ishlatishingiz mumkin.")
+                    
+                    # Adminga xabar yozish
+                    admin_text = (
+                        f"💰 <b>CLICK TO'LOV KELDI!</b>\n\n"
+                        f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
+                        f"💳 <b>Summa:</b> {amount} so'm\n"
+                        f"🎫 <b>Tarif:</b> {days} kun\n"
+                        f"📊 <b>Tranzaksiya:</b> <code>{click_trans_id}</code>\n\n"
+                        f"✅ Userga obunasi avtomatik berildi."
+                    )
+                    requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_text)}&parse_mode=HTML")
+                    
                     print(f"✅ COMPLETE Muvaffaqiyatli: {user_id} unga {days} kun berildi")
         except Exception as e:
             print("❌ Click complete update error:", e)
