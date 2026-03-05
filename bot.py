@@ -2317,7 +2317,19 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(context.args[0])
         days = int(context.args[1])
         
-        expiry_date = datetime.now() + timedelta(days=days)
+        existing_premium = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
+        if existing_premium:
+            current_expiry = existing_premium[0]
+            if isinstance(current_expiry, str):
+                current_expiry = datetime.fromisoformat(current_expiry)
+            
+            if current_expiry > datetime.now():
+                expiry_date = current_expiry + timedelta(days=days)
+            else:
+                expiry_date = datetime.now() + timedelta(days=days)
+        else:
+            expiry_date = datetime.now() + timedelta(days=days)
+            
         if DATABASE_URL:
             execute_query("""
                 INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
@@ -2534,8 +2546,20 @@ def click_complete():
                 
                 if tariff:
                     days = tariff[0]
-                    expiry_date = datetime.now() + timedelta(days=days)
                     
+                    existing_premium = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
+                    if existing_premium:
+                        current_expiry = existing_premium[0]
+                        if isinstance(current_expiry, str):
+                            current_expiry = datetime.fromisoformat(current_expiry)
+                        
+                        if current_expiry > datetime.now():
+                            expiry_date = current_expiry + timedelta(days=days)
+                        else:
+                            expiry_date = datetime.now() + timedelta(days=days)
+                    else:
+                        expiry_date = datetime.now() + timedelta(days=days)
+                        
                     if DATABASE_URL:
                         execute_query("""
                             INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
