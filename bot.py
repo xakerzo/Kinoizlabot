@@ -1861,6 +1861,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Broadcast tasdiqlash
         if action == "confirm_broadcast_photo":
             if text.upper() == "HA":
+                msg_id = context.user_data.get("broadcast_msg_id")
                 photo_id = context.user_data.get("broadcast_photo")
                 caption = context.user_data.get("broadcast_caption", "")
                 users = fetch_all("SELECT user_id FROM users")
@@ -1869,7 +1870,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 for u in users:
                     try:
-                        await context.bot.send_photo(u[0], photo_id, caption=caption)
+                        if msg_id:
+                            await context.bot.copy_message(chat_id=u[0], from_chat_id=update.message.chat_id, message_id=msg_id)
+                        else:
+                            await context.bot.send_photo(u[0], photo_id, caption=caption)
                         count += 1
                     except:
                         failed += 1
@@ -1882,6 +1886,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if action == "confirm_broadcast_video":
             if text.upper() == "HA":
+                msg_id = context.user_data.get("broadcast_msg_id")
                 video_id = context.user_data.get("broadcast_video")
                 caption = context.user_data.get("broadcast_caption", "")
                 users = fetch_all("SELECT user_id FROM users")
@@ -1890,7 +1895,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 for u in users:
                     try:
-                        await context.bot.send_video(u[0], video_id, caption=caption)
+                        if msg_id:
+                            await context.bot.copy_message(chat_id=u[0], from_chat_id=update.message.chat_id, message_id=msg_id)
+                        else:
+                            await context.bot.send_video(u[0], video_id, caption=caption)
                         count += 1
                     except:
                         failed += 1
@@ -1903,6 +1911,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Oddiy broadcast (faqat matn)
         if action == "broadcast_text":
+            msg_id = update.message.message_id
             users = fetch_all("SELECT user_id FROM users")
             count = 0
             failed = 0
@@ -1917,7 +1926,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_photo(u[0], photo_id, caption=caption)
                         elif premium_text:
                             await context.bot.send_message(u[0], premium_text)
-                    await context.bot.send_message(u[0], text)
+                    await context.bot.copy_message(chat_id=u[0], from_chat_id=update.message.chat_id, message_id=msg_id)
                     count += 1
                 except:
                     failed += 1
@@ -2216,6 +2225,7 @@ async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
     action = context.user_data.get("action")
     
     if action == "broadcast_video":
+        context.user_data["broadcast_msg_id"] = update.message.message_id
         context.user_data["broadcast_video"] = update.message.video.file_id
         context.user_data["broadcast_caption"] = update.message.caption or ""
         context.user_data["action"] = "confirm_broadcast_video"
@@ -2247,6 +2257,7 @@ async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
     action = context.user_data.get("action")
     
     if action == "broadcast_photo":
+        context.user_data["broadcast_msg_id"] = update.message.message_id
         context.user_data["broadcast_photo"] = update.message.photo[-1].file_id
         context.user_data["broadcast_caption"] = update.message.caption or ""
         context.user_data["action"] = "confirm_broadcast_photo"
