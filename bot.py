@@ -2985,12 +2985,13 @@ def payme_handler():
                         # Idempotency uchun: payme_t_id dan barqaror vaqt hosil qilamiz
                         import hashlib
                         h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
-                        stable_time = (h % 1000000000) + 1700000000000 # Barqaror timestamp
+                        stable_create = (h % 1000000000) + 1700000000000
+                        stable_perform = stable_create + 5000
                         
                         return jsonify({
                             "result": {
                                 "transaction": str(payme_t_id),
-                                "perform_time": stable_time,
+                                "perform_time": stable_perform,
                                 "state": 2
                             },
                             "id": req_id
@@ -3119,9 +3120,13 @@ def payme_handler():
                     PAYME_MOCK_STATES[str(payme_t_id)] = -1
                     try:
                         first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
-                        real_user_id = first_user[0] if first_user else 0
-                        now_ms = int(time.time() * 1000)
-                        db_create_transaction(real_user_id, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
+                        real_user_id = first_user[0] if first_user else OWNER_ID
+                        import hashlib
+                        h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
+                        stable_create = (h % 1000000000) + 1700000000000
+                        stable_cancel = stable_create + 10000
+                        
+                        db_create_transaction(real_user_id, 1000, None, created_at=stable_create, payme_id=payme_t_id)
                         db_update_transaction_status_with_payme(payme_t_id, "cancelled")
                         transaction = db_get_transaction_by_payme_id(payme_t_id)
                     except: pass
@@ -3129,11 +3134,12 @@ def payme_handler():
                     if not transaction:
                         import hashlib
                         h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
-                        stable_time = (h % 1000000000) + 1700000000000
+                        stable_create = (h % 1000000000) + 1700000000000
+                        stable_cancel = stable_create + 10000
                         return jsonify({
                             "result": {
                                 "transaction": str(payme_t_id),
-                                "cancel_time": stable_time + 5000,
+                                "cancel_time": stable_cancel,
                                 "state": -1
                             },
                             "id": req_id
