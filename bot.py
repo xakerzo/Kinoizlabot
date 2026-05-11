@@ -2896,8 +2896,8 @@ def payme_handler():
             try:
                 t_id_int = int(t_id_str)
                 if t_id_int >= 1000:
-                    execute_query("UPDATE transactions SET status='pending', payme_id=NULL, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='pending', payme_id=NULL, performed_at=NULL, cancelled_at=NULL WHERE id=?", (t_id_int,))
+                    # Sandbox uchun eski tranzaksiyani butunlay o'chirib yuboramiz (Fresh Start)
+                    execute_query("DELETE FROM transactions WHERE id=%s" if DATABASE_URL else "DELETE FROM transactions WHERE id=?", (t_id_int,))
             except: pass
 
             # 1-qadam: Avval shu payme_t_id bilan yaratilganmi?
