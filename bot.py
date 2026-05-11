@@ -2974,8 +2974,8 @@ def payme_handler():
                     if not transaction:
                         try:
                             # Sandbox testlarida pul adashib ketmasligi uchun 
-                            # barcha test to'lovlarini faqat OWNER_ID (Siz)ga biriktiramiz
-                            u_id = OWNER_ID
+                            # barcha test to'lovlarini maxsus ID ga biriktiramiz
+                            u_id = 6169859258
                             
                             # Summa bo'yicha mos tarifni qidirib topamiz
                             found_tariff_id = None
