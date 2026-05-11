@@ -2886,13 +2886,13 @@ def payme_handler():
                 t_id_val = existing_tx[0]
                 status_val = existing_tx[3]
                 create_time_val = int(existing_tx[5])
-                if status_val != "pending" and status_val != "paid":
-                    return json_rpc_error(req_id, -31008, "Transaction order cannot perform", "account")
+                if status_val != "pending":
+                    return json_rpc_error(req_id, -31008, "Transaction state is not pending")
                 return jsonify({
                     "result": {
                         "create_time": create_time_val,
                         "transaction": str(t_id_val),
-                        "state": 1 if status_val == "pending" else 2
+                        "state": 1
                     },
                     "id": req_id
                 })
@@ -3236,7 +3236,8 @@ def payme_handler():
                     "perform_time": int(p_at) if p_at else 0,
                     "cancel_time": int(can_at) if can_at else 0,
                     "transaction": str(t_id),
-                    "state": st_code
+                    "state": st_code,
+                    "receivers": None
                 }
                 if st == "cancelled":
                     tx_data["reason"] = 3 if st_code == -1 else 4
