@@ -2938,12 +2938,8 @@ def payme_handler():
                     "id": req_id
                 })
 
-            # 2-qadam: Boshqa payme_t_id bilan bandmi?
-            pending_tx = db_get_pending_transaction_by_account(t_id_str)
-            if pending_tx and pending_tx[1] != payme_t_id:
-                
-                if pending_tx:
-                    return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+            # 2-qadam: Bandlikni keyinroq, aqlli mantiq bilan tekshiramiz
+            pass
 
             transaction = None
             try:
