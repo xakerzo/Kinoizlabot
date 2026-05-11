@@ -2965,13 +2965,13 @@ def payme_handler():
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
                 
             if status != "pending":
-                return json_rpc_error(req_id, -31008, "Order is not pending")
+                # Protokol bo'yicha: Agar buyurtma allaqachon yakunlangan bo'lsa, -31050 qaytarish kerak
+                return json_rpc_error(req_id, -31050, "Order is already finished", "account")
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
-            import hashlib
-            h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
-            stable_create = (h % 1000000000) + 1700000000000
+            # Bazadagi yaratilgan vaqtni olamiz
+            stable_create = int(transaction[5]) if len(transaction) > 5 and transaction[5] else int(time.time() * 1000)
             
             return jsonify({
                 "result": {
