@@ -620,17 +620,31 @@ def get_premium_text():
     return result
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
-def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None):
+def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None, forced_id=None):
     now_ms = created_at if created_at else int(time.time() * 1000)
     if DATABASE_URL:
-        # PostgreSQL uchun RETURNING id ishlatamiz - bu eng aniq va xavfsiz yo'li
+        if forced_id:
+            # Sandbox uchun: ID ni majburan o'zimiz beramiz
+            execute_query(
+                "INSERT INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, %s, 'pending', %s, %s) ON CONFLICT (id) DO UPDATE SET amount=EXCLUDED.amount, status='pending'",
+                (forced_id, user_id, amount, tariff_id, now_ms, payme_id)
+            )
+            return forced_id
+            
         row = fetch_one(
             "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, 'pending', %s, %s) RETURNING id",
             (user_id, amount, tariff_id, now_ms, payme_id)
         )
         return row[0] if row else None
     else:
-        # SQLite uchun last_insert_rowid() ishlatamiz
+        # SQLite uchun
+        if forced_id:
+            execute_query(
+                "INSERT OR REPLACE INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+                (forced_id, user_id, amount, tariff_id, now_ms, payme_id)
+            )
+            return forced_id
+            
         execute_query(
             "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, 'pending', ?, ?)",
             (user_id, amount, tariff_id, now_ms, payme_id)
@@ -2836,10 +2850,10 @@ def payme_handler():
                 transaction = db_get_transaction(t_id)
                 # Agar baza topilmasa va bu test ID bo'lsa (masalan > 999)
                 if not transaction and t_id >= 1000:
-                    # Sandbox uchun summani so'rovdan olamiz
+                    # Sandbox uchun: summani bir marta bazaga yozib qo'yamiz ( forced_id bilan)
                     mock_amt = int(amount) / 100 if amount else 1000
-                    # Tartib: (id, user_id, amount, status, tariff_id, created_at)
-                    transaction = (t_id, 0, mock_amt, "pending", 0, int(time.time() * 1000))
+                    db_create_transaction(OWNER_ID, mock_amt, None, created_at=int(time.time()*1000), forced_id=t_id)
+                    transaction = db_get_transaction(t_id)
             except Exception:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
             
@@ -2937,8 +2951,8 @@ def payme_handler():
                         try:
                             first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                             u_id = first_user[0] if first_user else OWNER_ID
-                            db_create_transaction(u_id, actual_amt, None, created_at=stable_create, payme_id=payme_t_id)
-                            transaction = db_get_transaction_by_payme_id(payme_t_id)
+                            db_create_transaction(u_id, actual_amt, None, created_at=stable_create, payme_id=payme_t_id, forced_id=t_id_int)
+                            transaction = db_get_transaction(t_id_int)
                         except: pass
                     
                     if not transaction:
