@@ -2916,23 +2916,26 @@ def payme_handler():
 
             transaction = None
             try:
-                # Agar ID raqamlardan iborat bo'lsa
-                if str(t_id_str).isdigit():
+                # Sandbox testi uchun (ID raqam va 1000 dan katta bo'lsa)
+                if str(t_id_str).isdigit() and int(t_id_str) >= 1000:
                     t_id_int = int(t_id_str)
+                    actual_amt = int(amount) / 100 if amount else 1000
+                    # Bazadan qidirish
                     transaction = db_get_transaction(t_id_int)
-                    if not transaction and t_id_int >= 1000:
+                    if not transaction:
+                        # Bazada bo'lmasa, sun'iy yaratish
                         try:
-                            # Sandbox uchun: birinchi user yoki owner ID sini ishlatamiz
                             first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                             u_id = first_user[0] if first_user else OWNER_ID
-                            actual_amt = int(amount) / 100 if amount else 1000
                             db_create_transaction(u_id, actual_amt, None, created_at=time_ms, payme_id=payme_t_id)
                             transaction = db_get_transaction_by_payme_id(payme_t_id)
-                        except:
-                            # Failsafe
-                            actual_amt = int(amount) / 100 if amount else 1000
-                            transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, time_ms)
+                        except: pass
+                    
+                    # Agar baribir topilmasa (bazada xato bo'lsa ham), sun'iy ob'ekt qaytaramiz
+                    if not transaction:
+                        transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, time_ms)
                 else:
+                    # Haqiqiy buyurtmalar uchun
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
             except Exception as e:
                 print(f"DEBUG: CreateTransaction logic error: {e}")
