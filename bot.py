@@ -2973,10 +2973,9 @@ def payme_handler():
                     transaction = db_get_transaction(t_id_int)
                     if not transaction:
                         try:
-                            # Userni aniqlash (Default: Owner)
+                            # Sandbox testlarida pul adashib ketmasligi uchun 
+                            # barcha test to'lovlarini faqat OWNER_ID (Siz)ga biriktiramiz
                             u_id = OWNER_ID
-                            first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
-                            if first_user: u_id = first_user[0]
                             
                             # Summa bo'yicha mos tarifni qidirib topamiz
                             found_tariff_id = None
