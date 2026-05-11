@@ -2839,13 +2839,10 @@ def payme_handler():
             transaction = None
             try:
                 t_id = int(t_id_str)
-                # Test boshlanishidan oldin eski mock tranzaksiyalarni tozalash (faqat test ID uchun)
-                # Bu "Order is attached to another transaction" xatosini oldini oladi
+                # Sandbox uchun: har bir yangi tekshiruvda holatni 'pending'ga qaytaramiz (fresh start)
                 if t_id >= 1000:
-                    now_ms = int(time.time() * 1000)
-                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE user_id=%s AND status='pending'" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE user_id=? AND status='pending'", 
-                                 (now_ms, t_id))
+                    execute_query("UPDATE transactions SET status='pending', payme_id=NULL, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='pending', payme_id=NULL, performed_at=NULL, cancelled_at=NULL WHERE id=?", (t_id,))
 
                 transaction = db_get_transaction(t_id)
                 # Agar baza topilmasa va bu test ID bo'lsa (masalan > 999)
@@ -2887,13 +2884,12 @@ def payme_handler():
             if not t_id_str:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
 
-            # 0-qadam: Force Cleanup (Sandbox uchun)
+            # 0-qadam: Force Cleanup (Sandbox uchun har doim yangidan boshlash)
             try:
                 t_id_int = int(t_id_str)
                 if t_id_int >= 1000:
-                    execute_query("UPDATE transactions SET status='cancelled' WHERE (user_id=%s OR id=%s OR user_id=9999 OR user_id=0) AND status='pending' AND payme_id != %s" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='cancelled' WHERE (user_id=? OR id=? OR user_id=9999 OR user_id=0) AND status='pending' AND payme_id != ?", 
-                                 (t_id_int, t_id_int, payme_t_id))
+                    execute_query("UPDATE transactions SET status='pending', payme_id=NULL, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='pending', payme_id=NULL, performed_at=NULL, cancelled_at=NULL WHERE id=?", (t_id_int,))
             except: pass
 
             # 1-qadam: Avval shu payme_t_id bilan yaratilganmi?
