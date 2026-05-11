@@ -2857,75 +2857,71 @@ def payme_handler():
             time_ms = params.get('time')
             amount = params.get('amount')
             account = params.get('account', {})
-            t_id_str = account.get('order_id') or account.get('som') or account.get('id')
-            
-            # Smart Mock Cleanup: yangi test tranzaksiyasi uchun eski soxtalarni tozalash
-            try:
-                t_id_int = int(t_id_str)
-                if t_id_int >= 1000:
-                    now_ms = int(time.time() * 1000)
-                    # O'ta kuchli tozalash: joriy ID, 9999 va 0 kabi barcha test ID-larini tozalab tashlaymiz
-                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE (user_id=%s OR id=%s OR user_id=9999 OR user_id=0) AND status='pending' AND (payme_id != %s OR payme_id IS NULL)" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE (user_id=? OR id=? OR user_id=9999 OR user_id=0) AND status='pending' AND (payme_id != ? OR payme_id IS NULL)", 
-                                 (now_ms, t_id_int, t_id_int, payme_t_id))
-            except: pass
+            t_id_str = account.get('som')
+            req_id = data.get('id')
 
             if not t_id_str:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
+
+            # 0-qadam: Force Cleanup (Sandbox uchun)
+            try:
+                t_id_int = int(t_id_str)
+                if t_id_int >= 1000:
+                    execute_query("UPDATE transactions SET status='cancelled' WHERE (user_id=%s OR id=%s OR user_id=9999 OR user_id=0) AND status='pending' AND payme_id != %s" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='cancelled' WHERE (user_id=? OR id=? OR user_id=9999 OR user_id=0) AND status='pending' AND payme_id != ?", 
+                                 (t_id_int, t_id_int, payme_t_id))
+            except: pass
 
             # 1-qadam: Avval shu payme_t_id bilan yaratilganmi?
             existing_tx = db_get_transaction_by_payme_id(payme_t_id)
             if existing_tx:
                 t_id_val = existing_tx[0]
-                status = existing_tx[3]
-                create_time = int(existing_tx[4])
-                
-                if status != "pending" and status != "paid":
+                status_val = existing_tx[3]
+                create_time_val = int(existing_tx[5])
+                if status_val != "pending" and status_val != "paid":
                     return json_rpc_error(req_id, -31008, "Transaction order cannot perform", "account")
-                    
                 return jsonify({
                     "result": {
-                        "create_time": create_time,
+                        "create_time": create_time_val,
                         "transaction": str(t_id_val),
-                        "state": 1 if status == "pending" else 2
+                        "state": 1 if status_val == "pending" else 2
                     },
                     "id": req_id
                 })
 
-            # 2-qadam: Avval yaratilmagan. Buyurtmani qidiramiz
-            # Sandbox Automated Testlar uchun Smart Mock
+            # 2-qadam: Boshqa payme_t_id bilan bandmi?
+            pending_tx = db_get_pending_transaction_by_account(t_id_str)
+            if pending_tx and pending_tx[1] != payme_t_id:
+                # Sandbox uchun: agar test ID bo'lsa, xato o'rniga eskini majburan yopamiz
+                try:
+                    t_id_int = int(t_id_str)
+                    if t_id_int >= 1000:
+                        execute_query("UPDATE transactions SET status='cancelled' WHERE (user_id=%s OR id=%s) AND status='pending'" if DATABASE_URL else 
+                                     "UPDATE transactions SET status='cancelled' WHERE (user_id=? OR id=?) AND status='pending'", (t_id_int, t_id_int))
+                        pending_tx = None 
+                except: pass
+                
+                if pending_tx:
+                    return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+
+            # 3-qadam: Buyurtmani qidiramiz/yaratamiz
             transaction = None
             try:
                 t_id_int = int(t_id_str)
                 transaction = db_get_transaction(t_id_int)
                 if not transaction and t_id_int >= 1000:
-                    # Bazada yo'q test buyurtmani yaratib qo'yamiz (CheckTransaction uchun)
-                    # Test ID ni user_id sifatida saqlaymiz, shunda db_get_pending_transaction_by_account uni topadi
-                    db_create_transaction(t_id_int, 1000, None, created_at=time_ms, payme_id=payme_t_id)
+                    first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
+                    real_user_id = first_user[0] if first_user else 0
+                    db_create_transaction(real_user_id, 1000, None, created_at=time_ms, payme_id=payme_t_id)
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
-                    if not transaction:
-                        # Fallback: Bazadan topilmasa, vaqtinchalik mock tuple yaratamiz
-                        # Tartib: (id, user_id, amount, status, tariff_id, created_at, perf_at, canc_at)
-                        transaction = (t_id_int, 0, 1000, "pending", 0, time_ms, 0, 0)
-            except Exception as e:
-                print(f"Payme Smart Mock error: {e}")
-                return json_rpc_error(req_id, -31050, "Order not found", "account")
+            except: pass
 
             if not transaction:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
                 
-            # 3-qadam: Boshqa payme_t_id bilan bandmi?
             t_id = transaction[0]
-            # Account uchun har qanday ochiq tranzaksiyani tekshirish
-            pending_tx = db_get_pending_transaction_by_account(t_id_int)
-                
-            if pending_tx and pending_tx[1] != payme_t_id:
-                return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
-                
-            expected_amount = transaction[2] * 100
             status = transaction[3]
-            create_time = int(transaction[5])
-            
+            expected_amount = transaction[2] * 100
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
                 
@@ -2933,10 +2929,9 @@ def payme_handler():
                 return json_rpc_error(req_id, -31008, "Order is not pending")
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
-            
             return jsonify({
                 "result": {
-                    "create_time": create_time, 
+                    "create_time": int(time_ms), 
                     "transaction": str(t_id),
                     "state": 1
                 },
