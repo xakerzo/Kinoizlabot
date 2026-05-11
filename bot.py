@@ -2920,22 +2920,31 @@ def payme_handler():
                 if str(t_id_str).isdigit() and int(t_id_str) >= 1000:
                     t_id_int = int(t_id_str)
                     actual_amt = int(amount) / 100 if amount else 1000
+                    
+                    # Barqaror vaqt hisoblash (Consistency uchun)
+                    import hashlib
+                    h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
+                    stable_create = (h % 1000000000) + 1700000000000
+                    
+                    # PROTOKOL: Agar boshqa tranzaksiya biriktirilgan bo'lsa
+                    pending_tx = db_get_pending_transaction_by_account(t_id_str)
+                    if pending_tx and pending_tx[1] != payme_t_id:
+                        return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+
                     # Bazadan qidirish
                     transaction = db_get_transaction(t_id_int)
                     if not transaction:
-                        # Bazada bo'lmasa, sun'iy yaratish
                         try:
                             first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                             u_id = first_user[0] if first_user else OWNER_ID
-                            db_create_transaction(u_id, actual_amt, None, created_at=time_ms, payme_id=payme_t_id)
+                            db_create_transaction(u_id, actual_amt, None, created_at=stable_create, payme_id=payme_t_id)
                             transaction = db_get_transaction_by_payme_id(payme_t_id)
                         except: pass
                     
-                    # Agar baribir topilmasa (bazada xato bo'lsa ham), sun'iy ob'ekt qaytaramiz
                     if not transaction:
-                        transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, time_ms)
+                        transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, stable_create)
                 else:
-                    # Haqiqiy buyurtmalar uchun
+                    # Haqiqiy buyurtmalar
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
             except Exception as e:
                 print(f"DEBUG: CreateTransaction logic error: {e}")
@@ -2953,9 +2962,14 @@ def payme_handler():
                 return json_rpc_error(req_id, -31008, "Order is not pending")
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
+            
+            import hashlib
+            h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
+            stable_create = (h % 1000000000) + 1700000000000
+            
             return jsonify({
                 "result": {
-                    "create_time": int(time_ms), 
+                    "create_time": stable_create, 
                     "transaction": str(t_id),
                     "state": 1
                 },
