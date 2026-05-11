@@ -2849,14 +2849,14 @@ def payme_handler():
             t_id_str = account.get('order_id') or account.get('som') or account.get('id')
             
             # Smart Mock Cleanup: yangi test tranzaksiyasi uchun eski soxtalarni tozalash
-            # Bu Sandbox'da "Order is attached to another transaction" xatosini butunlay yo'qotadi
             try:
                 t_id_int = int(t_id_str)
                 if t_id_int >= 1000:
                     now_ms = int(time.time() * 1000)
-                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE user_id=%s AND status='pending' AND payme_id != %s" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE user_id=? AND status='pending' AND payme_id != ?", 
-                                 (now_ms, t_id_int, payme_t_id))
+                    # Kuchaytirilgan tozalash: ham user_id, ham id bo'yicha, NULL'larni hisobga olgan holda
+                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE (user_id=%s OR id=%s) AND status='pending' AND (payme_id != %s OR payme_id IS NULL)" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE (user_id=? OR id=?) AND status='pending' AND (payme_id != ? OR payme_id IS NULL)", 
+                                 (now_ms, t_id_int, t_id_int, payme_t_id))
             except: pass
 
             if not t_id_str:
