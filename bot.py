@@ -624,6 +624,14 @@ def get_premium_text():
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
 def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None, forced_id=None):
+    # Yangi buyurtma ochishdan oldin eskilarni o'chirib tashlaymiz
+    try:
+        if DATABASE_URL:
+            execute_query("DELETE FROM transactions WHERE user_id=%s AND status='pending'", (user_id,))
+        else:
+            execute_query("DELETE FROM transactions WHERE user_id=? AND status='pending'", (user_id,))
+    except: pass
+    
     now_ms = created_at if created_at else int(time.time() * 1000)
     if DATABASE_URL:
         if forced_id:
