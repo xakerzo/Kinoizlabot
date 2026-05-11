@@ -997,13 +997,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         price, days = tariff
         
+        # Click uchun ham buyurtma yaratamiz
+        order_id = db_create_transaction(user_id, price, int(tariff_id))
+        
         amount = price
         merchant_id = CLICK_MERCHANT_ID
         service_id = CLICK_SERVICE_ID
         
-        # Obonent ID si xar safar o'zgarishi uchun timestamp qoshamiz. Masalan: 1373647_1_17203...
-        unique_time = int(datetime.now().timestamp())
-        transaction_param = f"{user_id}_{tariff_id}_{unique_time}"
+        # Click uchun transaction_param sifatida order_id ni o'zini yuboramiz
+        transaction_param = f"{order_id}"
         
         click_app_url = f"https://my.click.uz/services/pay?service_id={service_id}&merchant_id={merchant_id}&amount={amount}&transaction_param={transaction_param}"
         
@@ -1011,7 +1013,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💳 Click orqali to'lash", url=click_app_url)]
         ]
         await query.message.reply_text(
+            f"🆔 <b>Buyurtma #{order_id}</b>\n\n"
             f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lash uchun tugmani bosing 👇",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -1040,7 +1044,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💎 Payme orqali to'lash", url=payme_url)]
         ]
         await query.message.reply_text(
+            f"🆔 <b>Buyurtma #{order_id}</b>\n\n"
             f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lash uchun tugmani bosing 👇",
+            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -2717,12 +2723,24 @@ def click_complete():
         
     if str(error_code) == "0":
         try:
-            # merchant_trans_id 3 ta qismdan iborat bo'lishi mumkin: user_id _ tariff_id _ timestamp
+            # merchant_trans_id qismlardan iborat bo'lishi mumkin (eski format) yoki faqat order_id (yangi format)
             parts = merchant_trans_id.split("_")
             if len(parts) >= 2:
+                # Eski format: user_id_tariff_id_timestamp
                 user_id = int(parts[0])
                 tariff_id = int(parts[1])
-                tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
+            else:
+                # Yangi format: faqat order_id
+                order_id = int(merchant_trans_id)
+                tx = db_get_transaction(order_id)
+                if tx:
+                    user_id = tx[1]
+                    tariff_id = tx[3]
+                else:
+                    print(f"❌ Click error: Order {order_id} topilmadi")
+                    return jsonify({"error": -5, "error_note": "Order not found"})
+
+            tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
                 
                 if tariff:
                     days = tariff[0]
