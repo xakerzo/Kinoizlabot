@@ -648,7 +648,12 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
         )
         return row[0] if row else None
     else:
-        # SQLite
+        # SQLite branch
+        try:
+            # Ustun borligini tekshiramiz
+            execute_query("ALTER TABLE transactions ADD COLUMN provider TEXT DEFAULT 'payme'")
+        except: pass
+
         if forced_id:
             execute_query(
                 "INSERT OR REPLACE INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id, provider) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
@@ -660,8 +665,9 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
             "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id, provider) VALUES (?, ?, ?, 'pending', ?, ?, ?)",
             (user_id, amount, tariff_id, now_ms, payme_id, provider)
         )
-        row = fetch_one("SELECT last_insert_rowid()")
-        return row[0] if row else None
+        # last_insert_rowid() ishlatamiz
+        res = fetch_one("SELECT id FROM transactions ORDER BY id DESC LIMIT 1")
+        return res[0] if res else None
 
 def db_get_transaction(t_id):
     return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=%s" if DATABASE_URL else 
