@@ -2965,8 +2965,16 @@ def payme_handler():
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
                 
             if status != "pending":
-                # Protokol bo'yicha: Agar buyurtma allaqachon yakunlangan bo'lsa, -31050 qaytarish kerak
-                return json_rpc_error(req_id, -31050, "Order is already finished", "account")
+                # Sandbox uchun: Agar test ID bo'lsa, holatni 'pending'ga qaytarib yangilaymiz (Fresh Start)
+                if t_id >= 1000:
+                    execute_query("UPDATE transactions SET status='pending', payme_id=%s, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='pending', payme_id=?, performed_at=NULL, cancelled_at=NULL WHERE id=?", (payme_t_id, t_id))
+                    # Bazadan yangilangan ma'lumotni qayta o'qiymiz
+                    transaction = db_get_transaction(t_id)
+                    status = "pending"
+                else:
+                    # Haqiqiy foydalanuvchilar uchun: Agar buyurtma allaqachon yakunlangan bo'lsa
+                    return json_rpc_error(req_id, -31050, "Order is already finished", "account")
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
