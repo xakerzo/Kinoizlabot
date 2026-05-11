@@ -3004,15 +3004,10 @@ def payme_handler():
                 
             t_id = transaction[0]
             status = transaction[3]
-            # 1. Avval bandlikni tekshiramiz (Protokol bo'yicha ustuvor)
+            # 1. Avval bandlikni tekshiramiz (Pending holatda)
             payme_id_in_db = transaction[6] # payme_id ustuni
             if status == "pending" and str(payme_id_in_db) != str(payme_t_id):
                 return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
-
-            # 2. Keyin summani tekshiramiz
-            expected_amount = int(transaction[2]) * 100
-            if int(amount) != expected_amount:
-                return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
 
             if status != "pending":
                 # Sandbox uchun: Agar test ID bo'lsa, holatni va vaqtni yangilaymiz (Fresh Start)
@@ -3028,6 +3023,11 @@ def payme_handler():
                 else:
                     # Haqiqiy foydalanuvchilar uchun: Agar buyurtma allaqachon yakunlangan bo'lsa
                     return json_rpc_error(req_id, -31050, "Order is already finished", "account")
+            
+            # 2. Summani eng oxirida tekshiramiz
+            expected_amount = int(transaction[2]) * 100
+            if int(amount) != expected_amount:
+                return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
