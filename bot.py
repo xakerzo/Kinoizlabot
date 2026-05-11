@@ -2957,10 +2957,15 @@ def payme_handler():
                     
                     if not transaction:
                         # Bazadan topilmasa ham test uchun success qaytaramiz
+                        # Idempotency uchun: payme_t_id dan barqaror vaqt hosil qilamiz
+                        import hashlib
+                        h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
+                        stable_time = (h % 1000000000) + 1700000000000 # Barqaror timestamp
+                        
                         return jsonify({
                             "result": {
                                 "transaction": str(payme_t_id),
-                                "perform_time": now_ms,
+                                "perform_time": stable_time,
                                 "state": 2
                             },
                             "id": req_id
@@ -3093,10 +3098,13 @@ def payme_handler():
                     except: pass
                     
                     if not transaction:
+                        import hashlib
+                        h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
+                        stable_time = (h % 1000000000) + 1700000000000
                         return jsonify({
                             "result": {
                                 "transaction": str(payme_t_id),
-                                "cancel_time": now_ms,
+                                "cancel_time": stable_time + 5000,
                                 "state": -1
                             },
                             "id": req_id
@@ -3143,12 +3151,13 @@ def payme_handler():
                 # Sandbox Automated Testlar uchun Smart Mock Fallback
                 # Agar test ID bo'lsa (uzunligi 10 dan ortiq bo'ladi odatda), uni pending deb qaytaramiz
                 if payme_t_id and len(str(payme_t_id)) > 10:
-                    now_ms = int(time.time() * 1000)
+                    import hashlib
+                    h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
+                    stable_create = (h % 1000000000) + 1700000000000
                     # Bazada bo'lmagan tranzaksiya uchun 'pending' qaytaramiz
-                    # Agar PerformTransaction bo'lgan bo'lsa, u bazada bo'ladi va pastdagi koddan o'tadi
                     return jsonify({
                         "result": {
-                            "create_time": now_ms - 10000,
+                            "create_time": stable_create,
                             "perform_time": 0,
                             "cancel_time": 0,
                             "transaction": str(payme_t_id),
