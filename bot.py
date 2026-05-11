@@ -2764,7 +2764,7 @@ def click_complete():
                 tx = db_get_transaction(order_id)
                 if tx:
                     user_id = tx[1]
-                    tariff_id = tx[3]
+                    tariff_id = tx[4] # To'g'ri: tariff_id indexi 4
                 else:
                     print(f"❌ Click error: Order {order_id} topilmadi")
                     return jsonify({"error": -5, "error_note": "Order not found"})
@@ -3383,22 +3383,25 @@ if __name__ == '__main__':
     print("🕸 Webhook server (Flask) ishga tushdi...")
 
     
-    # 1. Database jadvallarini tekshirish
-    print("🔍 Database jadvallarini tekshirilmoqda...")
     try:
-        execute_query("ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
-        print("✅ users jadvaliga balance qo'shildi.")
-    except Exception:
-        pass # Allaqachon mavjud
-        
-    try:
-        if DATABASE_URL:
-            execute_query("ALTER TABLE users ADD COLUMN last_check_date VARCHAR(20) DEFAULT ''")
-        else:
-            execute_query("ALTER TABLE users ADD COLUMN last_check_date VARCHAR(20) DEFAULT ''")
-        print("✅ users jadvaliga last_check_date qo'shildi.")
-    except Exception:
-        pass # Allaqachon mavjud
+        # Barcha kerakli ustunlarni qo'shish
+        cols = [
+            ("provider", "VARCHAR(20) DEFAULT 'click'"),
+            ("payme_id", "VARCHAR(100)"),
+            ("performed_at", "BIGINT"),
+            ("cancelled_at", "BIGINT"),
+            ("tariff_id", "INTEGER")
+        ]
+        for col_name, col_type in cols:
+            try:
+                if DATABASE_URL:
+                    execute_query(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_type}")
+                else:
+                    execute_query(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_type}")
+            except: pass
+        print("✅ Transactions jadvali yangilandi.")
+    except Exception as e:
+        print(f"⚠️ Baza yangilashda xato: {e}")
         
     try:
         update_total_videos_count()
