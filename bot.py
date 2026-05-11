@@ -679,8 +679,11 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
         return res[0] if res else None
 
 def db_get_transaction(t_id):
-    return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=%s" if DATABASE_URL else 
-                    "SELECT id, user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=?", (t_id,))
+    # Barcha ustunlarni o'qiymiz: id(0), user_id(1), amount(2), status(3), tariff_id(4), created_at(5), payme_id(6), performed_at(7), cancelled_at(8), provider(9)
+    if DATABASE_URL:
+        return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at, payme_id, performed_at, cancelled_at, provider FROM transactions WHERE id=%s", (t_id,))
+    else:
+        return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at, payme_id, performed_at, cancelled_at, provider FROM transactions WHERE id=?", (t_id,))
 
 def db_get_transaction_payme_id(t_id):
     row = fetch_one("SELECT payme_id FROM transactions WHERE id=%s" if DATABASE_URL else 
@@ -2992,7 +2995,7 @@ def payme_handler():
                         transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, stable_create)
                 else:
                     # Haqiqiy buyurtmalar
-                    transaction = db_get_transaction_by_payme_id(payme_t_id)
+                    transaction = db_get_transaction(t_id_int)
             except Exception as e:
                 print(f"DEBUG: CreateTransaction logic error: {e}")
 
@@ -3001,14 +3004,15 @@ def payme_handler():
                 
             t_id = transaction[0]
             status = transaction[3]
-            expected_amount = transaction[2] * 100
+            # 1. Avval bandlikni tekshiramiz (Protokol bo'yicha ustuvor)
+            payme_id_in_db = transaction[6] # payme_id ustuni
+            if status == "pending" and str(payme_id_in_db) != str(payme_t_id):
+                return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+
+            # 2. Keyin summani tekshiramiz
+            expected_amount = int(transaction[2]) * 100
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
-                
-            # 1. Boshqa payme_id bilan bandmi? (Pending holatda har doim tekshiramiz)
-            # transaction[6] - bu payme_id ustuni
-            if status == "pending" and str(transaction[6]) != str(payme_t_id):
-                return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
 
             if status != "pending":
                 # Sandbox uchun: Agar test ID bo'lsa, holatni va vaqtni yangilaymiz (Fresh Start)
