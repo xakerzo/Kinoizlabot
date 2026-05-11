@@ -3015,9 +3015,10 @@ def payme_handler():
                 # Sandbox uchun: Agar test ID bo'lsa, holatni va vaqtni yangilaymiz (Fresh Start)
                 if t_id >= 1000:
                     stable_create = int(time_ms) if time_ms else int(time.time() * 1000)
-                    sql = "UPDATE transactions SET status='pending', payme_id=%s, created_at=%s, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else \
-                          "UPDATE transactions SET status='pending', payme_id=?, created_at=?, performed_at=NULL, cancelled_at=NULL WHERE id=?"
-                    execute_query(sql, (payme_t_id, stable_create, t_id))
+                    # Summani ham yangilaymiz (agar yangi testda boshqa summa bo'lsa)
+                    sql = "UPDATE transactions SET status='pending', amount=%s, payme_id=%s, created_at=%s, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else \
+                          "UPDATE transactions SET status='pending', amount=?, payme_id=?, created_at=?, performed_at=NULL, cancelled_at=NULL WHERE id=?"
+                    execute_query(sql, (actual_amt, payme_t_id, stable_create, t_id))
                     
                     # Bazadan yangilangan ma'lumotni qayta o'qiymiz
                     transaction = db_get_transaction(t_id)
