@@ -2793,6 +2793,7 @@ def payme_handler():
         return json_rpc_error(None, -32504, "Insufficient privilege")
          
     req_data = request.json
+    print(f"DEBUG: Payme request: {req_data}")
     if not req_data:
         return json_rpc_error(None, -32700, "Parse error")
         
@@ -2858,7 +2859,7 @@ def payme_handler():
             amount = params.get('amount')
             account = params.get('account', {})
             t_id_str = account.get('order_id') or account.get('som') or account.get('id')
-            req_id = data.get('id')
+            req_id = req_data.get('id')
 
             if not t_id_str:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
@@ -2940,6 +2941,7 @@ def payme_handler():
 
         elif method == "PerformTransaction":
             payme_t_id = params.get('id')
+            req_id = req_data.get('id')
             transaction = db_get_transaction_by_payme_id(payme_t_id)
             
             now_ms = int(time.time() * 1000)
@@ -3085,6 +3087,7 @@ def payme_handler():
 
         elif method == "CancelTransaction":
             payme_t_id = params.get('id')
+            req_id = req_data.get('id')
             transaction = db_get_transaction_by_payme_id(payme_t_id)
             
             if not transaction:
@@ -3148,6 +3151,7 @@ def payme_handler():
             
         elif method == "CheckTransaction":
             payme_t_id = params.get('id')
+            req_id = req_data.get('id')
             transaction = db_get_transaction_by_payme_id(payme_t_id)
             
             if not transaction:
@@ -3189,14 +3193,14 @@ def payme_handler():
                 "perform_time": perform_time,
                 "cancel_time": cancel_time,
                 "transaction": str(t_id_val),
-                "state": state
+                "state": state,
+                "reason": (3 if state == -1 else 4) if status == "cancelled" else None
             }
-            if status == "cancelled":
-                res_r["reason"] = 3 if state == -1 else 4
                 
             return jsonify({"result": res_r, "id": req_id})
 
         elif method == "GetStatement":
+            req_id = req_data.get('id')
             from_ms = params.get('from', 0)
             to_ms = params.get('to', int(time.time() * 1000))
             rows = db_get_transactions_by_time_range(from_ms, to_ms)
