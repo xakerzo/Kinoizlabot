@@ -2741,43 +2741,43 @@ def click_complete():
                     return jsonify({"error": -5, "error_note": "Order not found"})
 
             tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
+            
+            if tariff:
+                days = tariff[0]
                 
-                if tariff:
-                    days = tariff[0]
+                existing_premium = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
+                if existing_premium:
+                    current_expiry = existing_premium[0]
+                    if isinstance(current_expiry, str):
+                        current_expiry = datetime.fromisoformat(current_expiry)
                     
-                    existing_premium = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
-                    if existing_premium:
-                        current_expiry = existing_premium[0]
-                        if isinstance(current_expiry, str):
-                            current_expiry = datetime.fromisoformat(current_expiry)
-                        
-                        if current_expiry > datetime.now():
-                            expiry_date = current_expiry + timedelta(days=days)
-                        else:
-                            expiry_date = datetime.now() + timedelta(days=days)
+                    if current_expiry > datetime.now():
+                        expiry_date = current_expiry + timedelta(days=days)
                     else:
                         expiry_date = datetime.now() + timedelta(days=days)
-                        
-                    if DATABASE_URL:
-                        execute_query("""
-                            INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (user_id) DO UPDATE SET 
-                            expiry_date = EXCLUDED.expiry_date,
-                            approved_date = EXCLUDED.approved_date
-                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-                    else:
-                        execute_query("""
-                            INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                            VALUES (?, ?, ?, ?)
-                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-                        
-                    # Foydalanuvchiga muvaffaqiyat haqida xabar yozish
-                    requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga obuna tarifingiz yoqildi, endi cheklovlarsiz ishlatishingiz mumkin.")
+                else:
+                    expiry_date = datetime.now() + timedelta(days=days)
                     
-                    # Adminga xabar yozish
-                    admin_text = (
-                        f"💰 <b>CLICK TO'LOV KELDI!</b>\n\n"
+                if DATABASE_URL:
+                    execute_query("""
+                        INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (user_id) DO UPDATE SET 
+                        expiry_date = EXCLUDED.expiry_date,
+                        approved_date = EXCLUDED.approved_date
+                    """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                else:
+                    execute_query("""
+                        INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                        VALUES (?, ?, ?, ?)
+                    """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                    
+                # Foydalanuvchiga muvaffaqiyat haqida xabar yozish
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga obuna tarifingiz yoqildi, endi cheklovlarsiz ishlatishingiz mumkin.")
+                
+                # Adminga xabar yozish
+                admin_text = (
+                    f"💰 <b>CLICK TO'LOV KELDI!</b>\n\n"
                         f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
                         f"💳 <b>Summa:</b> {amount} so'm\n"
                         f"🎫 <b>Tarif:</b> {days} kun\n"
