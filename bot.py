@@ -3099,33 +3099,49 @@ def payme_handler():
             premium_activated = False
             days = 0
             if tariff_id:
+                try:
+                    # premium_users jadvali borligini tekshirish
+                    if DATABASE_URL:
+                        execute_query("CREATE TABLE IF NOT EXISTS premium_users (user_id BIGINT PRIMARY KEY, expiry_date TIMESTAMP, approved_by BIGINT, approved_date TIMESTAMP)")
+                    else:
+                        execute_query("CREATE TABLE IF NOT EXISTS premium_users (user_id BIGINT PRIMARY KEY, expiry_date TEXT, approved_by BIGINT, approved_date TEXT)")
+                except: pass
+
                 tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
                 if tariff:
-                    days = tariff[0]
+                    days = int(tariff[0])
                     expiry_date = datetime.now() + timedelta(days=days)
                     
                     # Premium jadvalini yangilash
-                    if DATABASE_URL:
-                        execute_query("""
-                            INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (user_id) DO UPDATE SET 
-                            expiry_date = EXCLUDED.expiry_date,
-                            approved_date = EXCLUDED.approved_date
-                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-                    else:
-                        execute_query("""
-                            INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                            VALUES (?, ?, ?, ?)
-                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-                    premium_activated = True
+                    try:
+                        if DATABASE_URL:
+                            execute_query("""
+                                INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (user_id) DO UPDATE SET 
+                                expiry_date = EXCLUDED.expiry_date,
+                                approved_date = EXCLUDED.approved_date
+                            """, (user_id, expiry_date, 0, datetime.now()))
+                        else:
+                            execute_query("""
+                                INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                                VALUES (?, ?, ?, ?)
+                            """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                        premium_activated = True
+                    except Exception as e:
+                        print(f"❌ Premium berishda xato: {e}")
 
             # Balansni ham yangilaymiz (ehtiyot shart)
             db_update_balance(user_id, amount)
             new_balance = db_get_balance(user_id)
             
-            # User notification via Telegram API
+            # Admin notification via Telegram API
             try:
+                # Admin xabari (Debug uchun)
+                status_txt = f"✅ Premium {days} kunga berildi" if premium_activated else f"❌ Premium berilmadi (Tarif ID: {tariff_id})"
+                admin_text = f"💰 <b>PAYME MERCHANT TO'LOV!</b>\n\n👤 User: {user_id}\n💵 Summa: {amount} so'm\n📝 Status: {status_txt}"
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_text)}&parse_mode=HTML")
+
                 # Flaskda bot_app ga to'g'ridan-to'g'ri ulanish qiyin bo'lishi mumkin, 
                 # shuning uchun requests orqali yoki bot ob'ekti orqali yuboramiz.
                 # Bizda BOT_TOKEN bor.
