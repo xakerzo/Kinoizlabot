@@ -2949,7 +2949,10 @@ def payme_handler():
                 # Sandbox testi uchun (ID raqam va 1000 dan katta bo'lsa)
                 if str(t_id_str).isdigit() and int(t_id_str) >= 1000:
                     t_id_int = int(t_id_str)
-                    actual_amt = int(amount) / 100 if amount else 1000
+                    # Debug uchun log:
+                    raw_amt = int(amount) if amount else 0
+                    actual_amt = raw_amt / 100 if raw_amt > 0 else 1000
+                    print(f"DEBUG Payme Sandbox: Raw={raw_amt}, Actual={actual_amt}")
                     
                     # Payme yuborgan vaqtni ishlatamiz (Vaqt xatoligi chiqmasligi uchun)
                     stable_create = int(time_ms) if time_ms else int(time.time() * 1000)
