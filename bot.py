@@ -2836,8 +2836,10 @@ def payme_handler():
                 transaction = db_get_transaction(t_id)
                 # Agar baza topilmasa va bu test ID bo'lsa (masalan > 999)
                 if not transaction and t_id >= 1000:
+                    # Sandbox uchun summani so'rovdan olamiz
+                    mock_amt = int(amount) / 100 if amount else 1000
                     # Tartib: (id, user_id, amount, status, tariff_id, created_at)
-                    transaction = (t_id, 0, 1000, "pending", 0, int(time.time() * 1000))
+                    transaction = (t_id, 0, mock_amt, "pending", 0, int(time.time() * 1000))
             except Exception:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
             
@@ -2923,11 +2925,13 @@ def payme_handler():
                             # Sandbox uchun: birinchi user yoki owner ID sini ishlatamiz
                             first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                             u_id = first_user[0] if first_user else OWNER_ID
-                            db_create_transaction(u_id, 1000, None, created_at=time_ms, payme_id=payme_t_id)
+                            actual_amt = int(amount) / 100 if amount else 1000
+                            db_create_transaction(u_id, actual_amt, None, created_at=time_ms, payme_id=payme_t_id)
                             transaction = db_get_transaction_by_payme_id(payme_t_id)
                         except:
-                            # Failsafe: Agar baza xato bersa ham testni to'xtatmaymiz
-                            transaction = (t_id_int, OWNER_ID, 1000, "pending", None, time_ms)
+                            # Failsafe
+                            actual_amt = int(amount) / 100 if amount else 1000
+                            transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, time_ms)
                 else:
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
             except Exception as e:
