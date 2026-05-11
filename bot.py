@@ -2970,16 +2970,23 @@ def payme_handler():
                     transaction = db_get_transaction(t_id_int)
                     if not transaction:
                         try:
+                            # Userni aniqlash (Default: Owner)
+                            u_id = OWNER_ID
                             first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
-                            u_id = first_user[0] if first_user else OWNER_ID
+                            if first_user: u_id = first_user[0]
                             
                             # Summa bo'yicha mos tarifni qidirib topamiz
-                            t_row = fetch_one("SELECT id FROM tariffs WHERE price=%s" if DATABASE_URL else "SELECT id FROM tariffs WHERE price=?", (actual_amt,))
-                            found_tariff_id = t_row[0] if t_row else None
+                            found_tariff_id = None
+                            try:
+                                t_row = fetch_one("SELECT id FROM tariffs WHERE price=%s" if DATABASE_URL else "SELECT id FROM tariffs WHERE price=?", (int(actual_amt),))
+                                if t_row: found_tariff_id = t_row[0]
+                            except: pass
                             
+                            # Buyurtmani majburan yaratish
                             db_create_transaction(u_id, actual_amt, found_tariff_id, created_at=stable_create, payme_id=payme_t_id, forced_id=t_id_int, provider='payme')
                             transaction = db_get_transaction(t_id_int)
-                        except: pass
+                        except Exception as e:
+                            print(f"❌ Sandbox Create Error: {e}")
                     
                     if not transaction:
                         transaction = (t_id_int, OWNER_ID, actual_amt, "pending", None, stable_create)
