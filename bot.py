@@ -622,14 +622,21 @@ def get_premium_text():
 # ---------- PAYME DATABASE FUNCTIONS ----------
 def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None):
     now_ms = created_at if created_at else int(time.time() * 1000)
-    execute_query(
-        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, 'pending', %s, %s)" if DATABASE_URL else 
-        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, 'pending', ?, ?)",
-        (user_id, amount, tariff_id, now_ms, payme_id)
-    )
-    row = fetch_one("SELECT id FROM transactions WHERE user_id=%s ORDER BY id DESC LIMIT 1" if DATABASE_URL else 
-                   "SELECT id FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
-    return row[0] if row else None
+    if DATABASE_URL:
+        # PostgreSQL uchun RETURNING id ishlatamiz - bu eng aniq va xavfsiz yo'li
+        row = fetch_one(
+            "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, 'pending', %s, %s) RETURNING id",
+            (user_id, amount, tariff_id, now_ms, payme_id)
+        )
+        return row[0] if row else None
+    else:
+        # SQLite uchun last_insert_rowid() ishlatamiz
+        execute_query(
+            "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, 'pending', ?, ?)",
+            (user_id, amount, tariff_id, now_ms, payme_id)
+        )
+        row = fetch_one("SELECT last_insert_rowid()")
+        return row[0] if row else None
 
 def db_get_transaction(t_id):
     return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=%s" if DATABASE_URL else 
