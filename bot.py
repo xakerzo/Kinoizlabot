@@ -2972,11 +2972,16 @@ def payme_handler():
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
                 
+            # 1. Boshqa payme_id bilan bandmi? (Pending holatda)
+            if status == "pending" and transaction[6] and transaction[6] != payme_t_id:
+                return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+
             if status != "pending":
-                # Sandbox uchun: Agar test ID bo'lsa, holatni 'pending'ga qaytarib yangilaymiz (Fresh Start)
+                # Sandbox uchun: Agar test ID bo'lsa, holatni va vaqtni yangilaymiz (Fresh Start)
                 if t_id >= 1000:
-                    execute_query("UPDATE transactions SET status='pending', payme_id=%s, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='pending', payme_id=?, performed_at=NULL, cancelled_at=NULL WHERE id=?", (payme_t_id, t_id))
+                    stable_create = int(time_ms) if time_ms else int(time.time() * 1000)
+                    execute_query("UPDATE transactions SET status='pending', payme_id=%s, performed_at=NULL, cancelled_at=NULL, created_at=%s WHERE id=%s" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='pending', payme_id=?, performed_at=NULL, cancelled_at=NULL, created_at=? WHERE id=?", (payme_t_id, stable_create, t_id))
                     # Bazadan yangilangan ma'lumotni qayta o'qiymiz
                     transaction = db_get_transaction(t_id)
                     status = "pending"
@@ -2986,7 +2991,7 @@ def payme_handler():
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
-            # Bazadagi yaratilgan vaqtni olamiz
+            # Bazadagi yaratilgan vaqtni olamiz (u yangilangan yoki eskisi)
             stable_create = int(transaction[5]) if len(transaction) > 5 and transaction[5] else int(time.time() * 1000)
             
             return jsonify({
