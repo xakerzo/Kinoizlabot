@@ -2778,7 +2778,8 @@ def payme_handler():
         if method == "CheckPerformTransaction":
             amount = params.get('amount')
             account = params.get('account', {})
-            t_id_str = account.get('order_id')
+            # Payme kabinetidagi 'account' maydoni nomi (order_id, som, id bo'lishi mumkin)
+            t_id_str = account.get('order_id') or account.get('som') or account.get('id')
             
             if not t_id_str:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
@@ -2813,7 +2814,7 @@ def payme_handler():
             time_ms = params.get('time')
             amount = params.get('amount')
             account = params.get('account', {})
-            t_id_str = account.get('order_id')
+            t_id_str = account.get('order_id') or account.get('som') or account.get('id')
             
             if not t_id_str:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
