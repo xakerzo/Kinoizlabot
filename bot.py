@@ -3160,18 +3160,16 @@ def payme_handler():
                     # Xotiradan holatni tekshiramiz
                     state = PAYME_MOCK_STATES.get(str(payme_t_id), 1)
                     
-                    # Bazada bo'lmagan tranzaksiya uchun holat qaytaramiz
-                    return jsonify({
-                        "result": {
-                            "create_time": stable_create,
-                            "perform_time": stable_create + 10000 if state == 2 else 0,
-                            "cancel_time": stable_create + 10000 if state < 0 else 0,
-                            "transaction": str(payme_t_id),
-                            "state": state,
-                            "reason": 3 if state < 0 else None
-                        },
-                        "id": req_id
-                    })
+                    res_m = {
+                        "create_time": stable_create,
+                        "perform_time": stable_create + 5000 if state == 2 else 0,
+                        "cancel_time": stable_create + 10000 if state < 0 else 0,
+                        "transaction": str(payme_t_id),
+                        "state": state
+                    }
+                    if state < 0:
+                        res_m["reason"] = 3 if state == -1 else 4
+                    return jsonify({"result": res_m, "id": req_id})
                 return json_rpc_error(req_id, -31003, "Transaction not found")
             
             t_id_val = transaction[0]
@@ -3185,54 +3183,47 @@ def payme_handler():
                  state = 2
             elif status == "cancelled":
                  state = -1 if perform_time == 0 else -2
-                 
-            return jsonify({
-                "result": {
-                    "create_time": create_time,
-                    "perform_time": perform_time,
-                    "cancel_time": cancel_time,
-                    "transaction": str(t_id_val),
-                    "state": state,
-                    "reason": 3 if status == "cancelled" else None
-                },
-                "id": req_id
-            })
+            
+            res_r = {
+                "create_time": create_time,
+                "perform_time": perform_time,
+                "cancel_time": cancel_time,
+                "transaction": str(t_id_val),
+                "state": state
+            }
+            if status == "cancelled":
+                res_r["reason"] = 3 if state == -1 else 4
+                
+            return jsonify({"result": res_r, "id": req_id})
 
         elif method == "GetStatement":
             from_ms = params.get('from', 0)
             to_ms = params.get('to', int(time.time() * 1000))
-            
             rows = db_get_transactions_by_time_range(from_ms, to_ms)
             
             transactions_list = []
             for row in rows:
-                t_id, user_id, amount, status, created_at, payme_id, ts_ms = row
-                state = 1
-                if status == "paid":
-                    state = 2
-                elif status == "cancelled":
-                    state = -1
-                    
-                transactions_list.append({
-                    "id": payme_id,
-                    "time": ts_ms,
-                    "amount": amount * 100,
-                    "account": {"order_id": str(t_id)},
-                    "create_time": ts_ms,
-                    "perform_time": ts_ms if state == 2 else 0,
-                    "cancel_time": ts_ms if state == -1 else 0,
+                t_id, u_id, amt, st, tar, c_at, p_at, can_at = row
+                st_code = 1
+                if st == "paid": st_code = 2
+                elif st == "cancelled": st_code = -1 if (not p_at) else -2
+                
+                tx_data = {
+                    "id": str(t_id),
+                    "time": int(c_at),
+                    "amount": int(amt * 100),
+                    "account": {"som": str(t_id)},
+                    "create_time": int(c_at),
+                    "perform_time": int(p_at) if p_at else 0,
+                    "cancel_time": int(can_at) if can_at else 0,
                     "transaction": str(t_id),
-                    "state": state,
-                    "reason": 3 if state == -1 else None,
-                    "receivers": None
-                })
+                    "state": st_code
+                }
+                if st == "cancelled":
+                    tx_data["reason"] = 3 if st_code == -1 else 4
+                transactions_list.append(tx_data)
             
-            return jsonify({
-                "result": {
-                    "transactions": transactions_list
-                },
-                "id": req_id
-            })
+            return jsonify({"result": {"transactions": transactions_list}, "id": req_id})
             
         elif method == "ChangePassword":
             return jsonify({
