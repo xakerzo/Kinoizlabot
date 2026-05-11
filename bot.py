@@ -2892,12 +2892,10 @@ def payme_handler():
             if not t_id_str:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
 
-            # 0-qadam: Force Cleanup (Sandbox uchun har doim yangidan boshlash)
+            # 0-qadam: t_id_int aniqlash
+            t_id_int = None
             try:
-                t_id_int = int(t_id_str)
-                if t_id_int >= 1000:
-                    # Sandbox uchun eski tranzaksiyani butunlay o'chirib yuboramiz (Fresh Start)
-                    execute_query("DELETE FROM transactions WHERE id=%s" if DATABASE_URL else "DELETE FROM transactions WHERE id=?", (t_id_int,))
+                if str(t_id_str).isdigit(): t_id_int = int(t_id_str)
             except: pass
 
             # 1-qadam: Avval shu payme_t_id bilan yaratilganmi?
@@ -2920,14 +2918,6 @@ def payme_handler():
             # 2-qadam: Boshqa payme_t_id bilan bandmi?
             pending_tx = db_get_pending_transaction_by_account(t_id_str)
             if pending_tx and pending_tx[1] != payme_t_id:
-                # Sandbox uchun: agar test ID bo'lsa, xato o'rniga eskini majburan yopamiz
-                try:
-                    t_id_int = int(t_id_str)
-                    if t_id_int >= 1000:
-                        execute_query("UPDATE transactions SET status='cancelled' WHERE (user_id=%s OR id=%s) AND status='pending'" if DATABASE_URL else 
-                                     "UPDATE transactions SET status='cancelled' WHERE (user_id=? OR id=?) AND status='pending'", (t_id_int, t_id_int))
-                        pending_tx = None 
-                except: pass
                 
                 if pending_tx:
                     return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
@@ -2939,10 +2929,8 @@ def payme_handler():
                     t_id_int = int(t_id_str)
                     actual_amt = int(amount) / 100 if amount else 1000
                     
-                    # Barqaror vaqt hisoblash (Consistency uchun)
-                    import hashlib
-                    h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
-                    stable_create = (h % 1000000000) + 1700000000000
+                    # Payme yuborgan vaqtni ishlatamiz (Vaqt xatoligi chiqmasligi uchun)
+                    stable_create = int(time_ms) if time_ms else int(time.time() * 1000)
                     
                     # PROTOKOL: Agar boshqa tranzaksiya biriktirilgan bo'lsa
                     pending_tx = db_get_pending_transaction_by_account(t_id_str)
