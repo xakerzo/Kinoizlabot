@@ -294,7 +294,9 @@ if DATABASE_URL:
             amount INTEGER,
             tariff_id INTEGER,
             status TEXT,
-            created_at TEXT,
+            created_at BIGINT,
+            performed_at BIGINT DEFAULT 0,
+            cancelled_at BIGINT DEFAULT 0,
             payme_id TEXT
         )
     """)
@@ -436,7 +438,9 @@ else:
             amount INTEGER,
             tariff_id INTEGER,
             status TEXT,
-            created_at TEXT,
+            created_at BIGINT,
+            performed_at BIGINT DEFAULT 0,
+            cancelled_at BIGINT DEFAULT 0,
             payme_id TEXT
         )
     """)
@@ -614,18 +618,19 @@ def get_premium_text():
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
 def db_create_transaction(user_id, amount, tariff_id=None):
+    now_ms = int(time.time() * 1000)
     execute_query(
         "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at) VALUES (%s, %s, %s, 'pending', %s)" if DATABASE_URL else 
         "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
-        (user_id, amount, tariff_id, datetime.utcnow().isoformat())
+        (user_id, amount, tariff_id, now_ms)
     )
     row = fetch_one("SELECT id FROM transactions WHERE user_id=%s ORDER BY id DESC LIMIT 1" if DATABASE_URL else 
                    "SELECT id FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
     return row[0] if row else None
 
 def db_get_transaction(t_id):
-    return fetch_one("SELECT user_id, amount, status, tariff_id FROM transactions WHERE id=%s" if DATABASE_URL else 
-                    "SELECT user_id, amount, status, tariff_id FROM transactions WHERE id=?", (t_id,))
+    return fetch_one("SELECT user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=%s" if DATABASE_URL else 
+                    "SELECT user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=?", (t_id,))
 
 def db_get_transaction_payme_id(t_id):
     row = fetch_one("SELECT payme_id FROM transactions WHERE id=%s" if DATABASE_URL else 
@@ -633,16 +638,24 @@ def db_get_transaction_payme_id(t_id):
     return row[0] if row else None
 
 def db_update_transaction_status(t_id, status):
-    execute_query("UPDATE transactions SET status=%s WHERE id=%s" if DATABASE_URL else 
-                 "UPDATE transactions SET status=? WHERE id=?", (status, t_id))
+    now_ms = int(time.time() * 1000)
+    if status == "paid":
+        execute_query("UPDATE transactions SET status=%s, performed_at=%s WHERE id=%s" if DATABASE_URL else 
+                     "UPDATE transactions SET status=?, performed_at=? WHERE id=?", (status, now_ms, t_id))
+    elif status == "cancelled":
+        execute_query("UPDATE transactions SET status=%s, cancelled_at=%s WHERE id=%s" if DATABASE_URL else 
+                     "UPDATE transactions SET status=?, cancelled_at=? WHERE id=?", (status, now_ms, t_id))
+    else:
+        execute_query("UPDATE transactions SET status=%s WHERE id=%s" if DATABASE_URL else 
+                     "UPDATE transactions SET status=? WHERE id=?", (status, t_id))
 
 def db_update_transaction_payme_id(t_id, payme_id):
     execute_query("UPDATE transactions SET payme_id=%s WHERE id=%s" if DATABASE_URL else 
                  "UPDATE transactions SET payme_id=? WHERE id=?", (payme_id, t_id))
 
 def db_get_transaction_by_payme_id(payme_id):
-    return fetch_one("SELECT id, user_id, amount, status, created_at, tariff_id FROM transactions WHERE payme_id=%s" if DATABASE_URL else 
-                    "SELECT id, user_id, amount, status, created_at, tariff_id FROM transactions WHERE payme_id=?", (payme_id,))
+    return fetch_one("SELECT id, user_id, amount, status, created_at, tariff_id, performed_at, cancelled_at FROM transactions WHERE payme_id=%s" if DATABASE_URL else 
+                    "SELECT id, user_id, amount, status, created_at, tariff_id, performed_at, cancelled_at FROM transactions WHERE payme_id=?", (payme_id,))
 
 def db_update_balance(user_id, amount):
     execute_query("UPDATE users SET balance = balance + %s WHERE user_id = %s" if DATABASE_URL else 
@@ -2824,8 +2837,7 @@ def payme_handler():
             if existing_tx:
                 t_id_val = existing_tx[0]
                 status = existing_tx[3]
-                created_at = existing_tx[4]
-                create_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+                create_time = int(existing_tx[4])
                 
                 if status != "pending" and status != "paid":
                     return json_rpc_error(req_id, -31008, "Transaction order cannot perform", "account")
@@ -2857,6 +2869,7 @@ def payme_handler():
                 
             expected_amount = transaction[1] * 100
             status = transaction[2]
+            create_time = int(transaction[4])
             
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
@@ -2866,14 +2879,10 @@ def payme_handler():
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
-            fresh_tx = db_get_transaction_by_payme_id(payme_t_id)
-            created_at = fresh_tx[4] if fresh_tx else None
-            create_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
-                
             return jsonify({
                 "result": {
                     "create_time": create_time, 
-                    "transaction": str(t_id_str),
+                    "transaction": str(t_id),
                     "state": 1
                 },
                 "id": req_id
@@ -2890,15 +2899,16 @@ def payme_handler():
             user_id = transaction[1]
             amount = transaction[2]
             status = transaction[3]
-            created_at = transaction[4]
+            create_time = int(transaction[4])
             tariff_id = transaction[5]
-            perform_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+            
+            now_ms = int(time.time() * 1000)
 
             if status == "paid":
                  return jsonify({
                     "result": {
                         "transaction": str(t_id),
-                        "perform_time": perform_time,
+                        "perform_time": int(transaction[6]) if transaction[6] else now_ms,
                         "state": 2
                     },
                     "id": req_id
@@ -2986,7 +2996,7 @@ def payme_handler():
             return jsonify({
                 "result": {
                     "transaction": str(t_id),
-                    "perform_time": perform_time,
+                    "perform_time": now_ms,
                     "state": 2
                 },
                 "id": req_id
@@ -3000,20 +3010,22 @@ def payme_handler():
             
             t_id_val = transaction[0]
             status = transaction[3]
-            created_at = transaction[4]
-            cancel_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+            create_time = int(transaction[4])
+            now_ms = int(time.time() * 1000)
             
             if status == "cancelled":
                  return jsonify({
                      "result": {
                          "transaction": str(t_id_val),
-                         "cancel_time": cancel_time,
+                         "cancel_time": int(transaction[7]) if transaction[7] else now_ms,
                          "state": -1
                      },
                      "id": req_id
                  })
                  
             if status == "paid":
+                 # To'langan tranzaksiyani bekor qilish (refund)
+                 # Hozircha refund qo'llab-quvvatlanmaydi deb qaytaramiz yoki kodingizga qarab:
                  return json_rpc_error(req_id, -31007, "Transaction can not be cancelled")
                  
             db_update_transaction_status(t_id_val, "cancelled")
@@ -3021,7 +3033,7 @@ def payme_handler():
             return jsonify({
                 "result": {
                     "transaction": str(t_id_val),
-                    "cancel_time": cancel_time,
+                    "cancel_time": now_ms,
                     "state": -1
                 },
                 "id": req_id
@@ -3035,8 +3047,9 @@ def payme_handler():
                 
             t_id_val = transaction[0]
             status = transaction[3]
-            created_at = transaction[4]
-            create_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+            create_time = int(transaction[4])
+            perform_time = int(transaction[6]) if transaction[6] else 0
+            cancel_time = int(transaction[7]) if transaction[7] else 0
             
             state = 1
             if status == "paid":
@@ -3047,8 +3060,8 @@ def payme_handler():
             return jsonify({
                 "result": {
                     "create_time": create_time,
-                    "perform_time": 0 if state != 2 else create_time,
-                    "cancel_time": 0 if state != -1 else create_time,
+                    "perform_time": perform_time,
+                    "cancel_time": cancel_time,
                     "transaction": str(t_id_val),
                     "state": state,
                     "reason": 3 if state == -1 else None
