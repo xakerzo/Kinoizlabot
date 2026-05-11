@@ -2800,7 +2800,7 @@ def payme_handler():
                 
             # Sandbox Automated Testlar uchun maxsus (ID: 1000)
             if t_id_str == "1000":
-                transaction = (0, 1000, "pending", 0, int(time.time() * 1000)) # Mock transaction (1000 som)
+                transaction = (0, 10, "pending", 0, int(time.time() * 1000)) # Mock transaction (10 som = 1000 tiyin)
             else:
                 try:
                     t_id = int(t_id_str)
@@ -2859,7 +2859,7 @@ def payme_handler():
             # 2-qadam: Avval yaratilmagan. Buyurtmani qidiramiz
             # Sandbox Automated Testlar uchun maxsus (ID: 1000)
             if t_id_str == "1000":
-                transaction = (0, 1000, "pending", 0, int(time.time() * 1000)) # Mock transaction
+                transaction = (0, 10, "pending", 0, int(time.time() * 1000)) # Mock transaction
             else:
                 try:
                     t_id = int(t_id_str)
