@@ -2958,7 +2958,17 @@ def payme_handler():
                     # PROTOKOL: Agar boshqa tranzaksiya biriktirilgan bo'lsa
                     pending_tx = db_get_pending_transaction_by_account(t_id_str)
                     if pending_tx and pending_tx[1] != payme_t_id:
-                        return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+                        # Aqlli Reset: Agar eski buyurtma 30 sekunddan oldin yaratilgan bo'lsa (stale test), 
+                        # uni o'chirib yangisiga yo'l ochamiz.
+                        tx_time = int(pending_tx[4]) if pending_tx[4] else 0
+                        if (int(time.time() * 1000) - tx_time) > 30000:
+                            if DATABASE_URL:
+                                execute_query("DELETE FROM transactions WHERE id=%s", (t_id_int,))
+                            else:
+                                execute_query("DELETE FROM transactions WHERE id=?", (t_id_int,))
+                            pending_tx = None
+                        else:
+                            return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
 
                     # Bazadan qidirish
                     transaction = db_get_transaction(t_id_int)
