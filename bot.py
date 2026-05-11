@@ -3183,10 +3183,9 @@ def payme_handler():
                         "perform_time": stable_create + 5000 if state == 2 else 0,
                         "cancel_time": stable_create + 10000 if state < 0 else 0,
                         "transaction": str(payme_t_id),
-                        "state": state
+                        "state": state,
+                        "reason": (3 if state == -1 else 4) if state < 0 else None
                     }
-                    if state < 0:
-                        res_m["reason"] = 3 if state == -1 else 4
                     return jsonify({"result": res_m, "id": req_id})
                 return json_rpc_error(req_id, -31003, "Transaction not found")
             
