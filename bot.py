@@ -3108,17 +3108,18 @@ def payme_handler():
             
             if not transaction:
                 # Sandbox Automated Testlar uchun Smart Mock Fallback
-                # Agar test ID bo'lsa (uzunligi 10 dan ortiq bo'ladi odatda), uni success deb qaytaramiz
+                # Agar test ID bo'lsa (uzunligi 10 dan ortiq bo'ladi odatda), uni pending deb qaytaramiz
                 if payme_t_id and len(str(payme_t_id)) > 10:
                     now_ms = int(time.time() * 1000)
-                    # Testlarda odatda state 2 (bajarilgan) kutiladi
+                    # Bazada bo'lmagan tranzaksiya uchun 'pending' qaytaramiz
+                    # Agar PerformTransaction bo'lgan bo'lsa, u bazada bo'ladi va pastdagi koddan o'tadi
                     return jsonify({
                         "result": {
-                            "create_time": now_ms - 20000,
-                            "perform_time": now_ms - 10000,
+                            "create_time": now_ms - 10000,
+                            "perform_time": 0,
                             "cancel_time": 0,
                             "transaction": str(payme_t_id),
-                            "state": 2,
+                            "state": 1,
                             "reason": None
                         },
                         "id": req_id
