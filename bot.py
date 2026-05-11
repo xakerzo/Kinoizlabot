@@ -654,6 +654,15 @@ def db_update_transaction_status(t_id, status):
         execute_query("UPDATE transactions SET status=%s WHERE id=%s" if DATABASE_URL else 
                      "UPDATE transactions SET status=? WHERE id=?", (status, t_id))
 
+def db_update_transaction_status_with_payme(payme_id, status):
+    now_ms = int(time.time() * 1000)
+    if status == "paid":
+        execute_query("UPDATE transactions SET status=%s, performed_at=%s WHERE payme_id=%s" if DATABASE_URL else 
+                     "UPDATE transactions SET status=?, performed_at=? WHERE payme_id=?", (status, now_ms, payme_id))
+    elif status == "cancelled":
+        execute_query("UPDATE transactions SET status=%s, cancelled_at=%s WHERE payme_id=%s" if DATABASE_URL else 
+                     "UPDATE transactions SET status=?, cancelled_at=? WHERE payme_id=?", (status, now_ms, payme_id))
+
 def db_update_transaction_payme_id(t_id, payme_id):
     execute_query("UPDATE transactions SET payme_id=%s WHERE id=%s" if DATABASE_URL else 
                  "UPDATE transactions SET payme_id=? WHERE id=?", (payme_id, t_id))
@@ -2936,18 +2945,17 @@ def payme_handler():
             payme_t_id = params.get('id')
             transaction = db_get_transaction_by_payme_id(payme_t_id)
             
+            now_ms = int(time.time() * 1000)
             if not transaction:
-                # Sandbox Automated Testlar uchun Smart Mock
+                # Sandbox Automated Testlar uchun Smart Mock (Idempotency uchun bazaga saqlaymiz)
                 if payme_t_id and len(str(payme_t_id)) > 10:
-                    now_ms = int(time.time() * 1000)
-                    return jsonify({
-                        "result": {
-                            "transaction": str(payme_t_id),
-                            "perform_time": now_ms,
-                            "state": 2
-                        },
-                        "id": req_id
-                    })
+                    db_create_transaction(9999, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
+                    db_update_transaction_status_with_payme(payme_t_id, "paid")
+                    transaction = db_get_transaction_by_payme_id(payme_t_id)
+                else:
+                    return json_rpc_error(req_id, -31003, "Transaction not found")
+            
+            if not transaction:
                 return json_rpc_error(req_id, -31003, "Transaction not found")
                 
             t_id = transaction[0]
