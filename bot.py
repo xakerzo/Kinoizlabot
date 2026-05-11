@@ -3150,9 +3150,15 @@ def payme_handler():
             
             # Admin notification via Telegram API
             try:
-                # Admin xabari (Debug uchun)
-                status_txt = f"✅ Premium {days} kunga berildi" if premium_activated else f"❌ Premium berilmadi (Tarif ID: {tariff_id})"
-                admin_text = f"💰 <b>PAYME MERCHANT TO'LOV!</b>\n\n👤 User: {user_id}\n💵 Summa: {amount} so'm\n📝 Status: {status_txt}"
+                # Admin uchun yakuniy xabar
+                status_txt = f"✅ Premium {days} kunga faollashtirildi!" if premium_activated else f"❌ Premium berilmadi (Tarif topilmadi, ID: {tariff_id})"
+                admin_text = (
+                    f"💰 <b>PAYME TO'LOV QABUL QILINDI!</b>\n\n"
+                    f"👤 Foydalanuvchi: <code>{user_id}</code>\n"
+                    f"📥 Buyurtma ID: <code>{t_id}</code>\n"
+                    f"💵 Summa: {amount} so'm\n"
+                    f"📝 Status: {status_txt}"
+                )
                 requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_text)}&parse_mode=HTML")
 
                 # Flaskda bot_app ga to'g'ridan-to'g'ri ulanish qiyin bo'lishi mumkin, 
