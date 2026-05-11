@@ -2914,18 +2914,22 @@ def payme_handler():
 
             transaction = None
             try:
-                t_id_int = int(t_id_str)
-                transaction = db_get_transaction(t_id_int)
-                if not transaction and t_id_int >= 1000:
-                    # Sandbox uchun majburiy yaratish
-                    first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
-                    real_user_id = first_user[0] if first_user else 0
-                    # 1000 so'm (100000 tiyin) test summasi
-                    db_create_transaction(real_user_id, 1000, None, created_at=time_ms, payme_id=payme_t_id)
+                # Agar ID raqamlardan iborat bo'lsa
+                if str(t_id_str).isdigit():
+                    t_id_int = int(t_id_str)
+                    transaction = db_get_transaction(t_id_int)
+                    if not transaction and t_id_int >= 1000:
+                        print(f"DEBUG: Mocking transaction for ID {t_id_int}")
+                        first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
+                        real_user_id = first_user[0] if first_user else 0
+                        db_create_transaction(real_user_id, 1000, None, created_at=time_ms, payme_id=payme_t_id)
+                        transaction = db_get_transaction_by_payme_id(payme_t_id)
+                        print(f"DEBUG: Mocked transaction: {transaction}")
+                else:
+                    # ID raqam bo'lmasa
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
             except Exception as e:
-                print(f"CreateTransaction mock error: {e}")
-                pass
+                print(f"DEBUG: CreateTransaction logic error: {e}")
 
             if not transaction:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
