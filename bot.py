@@ -655,8 +655,8 @@ def db_update_transaction_payme_id(t_id, payme_id):
                  "UPDATE transactions SET payme_id=? WHERE id=?", (payme_id, t_id))
 
 def db_get_transaction_by_payme_id(payme_id):
-    return fetch_one("SELECT id, user_id, amount, status, created_at, tariff_id, performed_at, cancelled_at FROM transactions WHERE payme_id=%s" if DATABASE_URL else 
-                    "SELECT id, user_id, amount, status, created_at, tariff_id, performed_at, cancelled_at FROM transactions WHERE payme_id=?", (payme_id,))
+    return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at, performed_at, cancelled_at FROM transactions WHERE payme_id=%s" if DATABASE_URL else 
+                    "SELECT id, user_id, amount, status, tariff_id, created_at, performed_at, cancelled_at FROM transactions WHERE payme_id=?", (payme_id,))
 
 def db_update_balance(user_id, amount):
     execute_query("UPDATE users SET balance = balance + %s WHERE user_id = %s" if DATABASE_URL else 
@@ -2870,8 +2870,8 @@ def payme_handler():
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
                     if not transaction:
                         # Fallback: Bazadan topilmasa, vaqtinchalik mock tuple yaratamiz
-                        # Tartib: (id, user_id, amount, status, created_at, tariff_id, perf_at, canc_at)
-                        transaction = (t_id_int, 0, 1000, "pending", time_ms, 0, 0, 0)
+                        # Tartib: (id, user_id, amount, status, tariff_id, created_at, perf_at, canc_at)
+                        transaction = (t_id_int, 0, 1000, "pending", 0, time_ms, 0, 0)
             except Exception as e:
                 print(f"Payme Smart Mock error: {e}")
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
@@ -2918,8 +2918,8 @@ def payme_handler():
             user_id = transaction[1]
             amount = transaction[2]
             status = transaction[3]
-            create_time = int(transaction[4])
-            tariff_id = transaction[5]
+            create_time = int(transaction[5])
+            tariff_id = transaction[4]
             
             now_ms = int(time.time() * 1000)
 
@@ -3066,7 +3066,7 @@ def payme_handler():
                 
             t_id_val = transaction[0]
             status = transaction[3]
-            create_time = int(transaction[4])
+            create_time = int(transaction[5])
             perform_time = int(transaction[6]) if transaction[6] else 0
             cancel_time = int(transaction[7]) if transaction[7] else 0
             
