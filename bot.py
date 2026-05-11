@@ -3174,35 +3174,14 @@ def payme_handler():
                 # InlineKeyboardMarkup ni dict ko'rinishiga o'tkazamiz
                 markup = vip_tariffs_buttons(tariffs).to_dict() if tariffs else None
                 
-                if premium_activated:
-                    msg_text = (
-                        f"🎉 Payme orqali to'lovingiz muvaffaqiyatli qabul qilindi!\n\n"
-                        f"✅ Sizga {days} kunlik premium obuna faollashtirildi.\n"
-                        f"Endi botdan reklamalarsiz foydalanishingiz mumkin!"
-                    )
-                else:
-                    msg_text = (
-                        f"🎉 Payme orqali to'lovingiz muvaffaqiyatli qabul qilindi!\n\n"
-                        f"💳 Balansga qo'shildi: {amount} so'm\n"
-                        f"💰 Joriy balansingiz: {new_balance} so'm\n\n"
-                        f"💎 Quyidagi VIP paketlardan birini xarid qilishingiz mumkin:"
-                    )
-                
-                payload = {
-                    "chat_id": user_id,
-                    "text": msg_text,
-                    "reply_markup": json.dumps(markup) if markup else None
-                }
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=payload)
-                
-                # Admin notify
-                admin_msg = (
-                    f"💰 <b>PAYME MERCHANT TO'LOV KELDI!</b>\n\n"
-                    f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
-                    f"📥 <b>Buyurtma:</b> {t_id}\n"
-                    f"💵 <b>Summa:</b> {amount} so'm\n"
+                # Userga xabar (Har doim)
+                status_user = f"✅ Sizga {days} kunlik premium berildi!" if premium_activated else f"💳 Balansingizga {amount} so'm qo'shildi."
+                user_text = (
+                    f"🎉 <b>To'lov qabul qilindi!</b>\n\n"
+                    f"{status_user}\n"
+                    f"💰 Joriy balans: {new_balance} so'm"
                 )
-                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_msg)}&parse_mode=HTML")
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text={urllib.parse.quote(user_text)}&parse_mode=HTML")
                 
             except Exception as e:
                 print(f"Payme notify error: {e}")
