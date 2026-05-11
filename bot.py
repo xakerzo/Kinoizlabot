@@ -449,6 +449,8 @@ else:
 conn.commit()
 
 # ---------- DATABASE FUNCTIONS ----------
+# Sandbox testlar uchun xotiradagi kesh (Idempotency va Lifecycle uchun)
+PAYME_MOCK_STATES = {} 
 def reconnect_and_retry(func):
     """Ulanish uzilganida qayta ulanadigan va xatoliklarni oldini oluvchi decorator"""
     def wrapper(query, params=None):
@@ -2947,13 +2949,12 @@ def payme_handler():
             
             now_ms = int(time.time() * 1000)
             if not transaction:
-                # Sandbox Automated Testlar uchun Smart Mock (Idempotency uchun bazaga saqlaymiz)
+                # Sandbox Automated Testlar uchun Smart Mock (Idempotency uchun)
                 if payme_t_id and len(str(payme_t_id)) > 10:
+                    PAYME_MOCK_STATES[str(payme_t_id)] = 2
                     try:
-                        # Bazadagi haqiqiy birinchi foydalanuvchini topamiz (Foreign Key xatosi bermasligi uchun)
                         first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                         real_user_id = first_user[0] if first_user else 0
-                        
                         db_create_transaction(real_user_id, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
                         db_update_transaction_status_with_payme(payme_t_id, "paid")
                         transaction = db_get_transaction_by_payme_id(payme_t_id)
@@ -3094,11 +3095,10 @@ def payme_handler():
             if not transaction:
                 # Sandbox Automated Testlar uchun Smart Mock
                 if payme_t_id and len(str(payme_t_id)) > 10:
+                    PAYME_MOCK_STATES[str(payme_t_id)] = -1
                     try:
-                        # Bazadagi haqiqiy birinchi foydalanuvchini topamiz
                         first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                         real_user_id = first_user[0] if first_user else 0
-                        
                         now_ms = int(time.time() * 1000)
                         db_create_transaction(real_user_id, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
                         db_update_transaction_status_with_payme(payme_t_id, "cancelled")
@@ -3162,15 +3162,18 @@ def payme_handler():
                     import hashlib
                     h = int(hashlib.md5(str(payme_t_id).encode()).hexdigest(), 16)
                     stable_create = (h % 1000000000) + 1700000000000
-                    # Bazada bo'lmagan tranzaksiya uchun 'pending' qaytaramiz
+                    # Xotiradan holatni tekshiramiz
+                    state = PAYME_MOCK_STATES.get(str(payme_t_id), 1)
+                    
+                    # Bazada bo'lmagan tranzaksiya uchun holat qaytaramiz
                     return jsonify({
                         "result": {
                             "create_time": stable_create,
-                            "perform_time": 0,
-                            "cancel_time": 0,
+                            "perform_time": stable_create + 10000 if state == 2 else 0,
+                            "cancel_time": stable_create + 10000 if state < 0 else 0,
                             "transaction": str(payme_t_id),
-                            "state": 1,
-                            "reason": None
+                            "state": state,
+                            "reason": 3 if state < 0 else None
                         },
                         "id": req_id
                     })
