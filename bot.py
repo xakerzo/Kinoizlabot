@@ -2905,17 +2905,20 @@ def payme_handler():
                 if pending_tx:
                     return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
 
-            # 3-qadam: Buyurtmani qidiramiz/yaratamiz
             transaction = None
             try:
                 t_id_int = int(t_id_str)
                 transaction = db_get_transaction(t_id_int)
                 if not transaction and t_id_int >= 1000:
+                    # Sandbox uchun majburiy yaratish
                     first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                     real_user_id = first_user[0] if first_user else 0
+                    # 1000 so'm (100000 tiyin) test summasi
                     db_create_transaction(real_user_id, 1000, None, created_at=time_ms, payme_id=payme_t_id)
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
-            except: pass
+            except Exception as e:
+                print(f"CreateTransaction mock error: {e}")
+                pass
 
             if not transaction:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
