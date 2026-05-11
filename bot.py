@@ -18,9 +18,11 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 BOT_USERNAME = "@kinoni_izlabot"
 BOT_LINK = "https://t.me/kinoni_izlabot"
 
-CLICK_MERCHANT_ID = os.environ.get('CLICK_MERCHANT_ID')
-CLICK_SERVICE_ID = os.environ.get('CLICK_SERVICE_ID')
 CLICK_SECRET_KEY = os.environ.get('CLICK_SECRET_KEY')
+
+# ---------- PAYME CONFIG ----------
+PAYME_MERCHANT_ID = os.environ.get('PAYME_MERCHANT_ID')
+PAYME_TOKEN = os.environ.get('PAYME_TOKEN')
 
 # ---------- YANGI OWNER TUGMA TIZIMI ----------
 OWNER_KEYBOARD = {
@@ -171,7 +173,9 @@ if DATABASE_URL:
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY
+            user_id BIGINT PRIMARY KEY,
+            balance INTEGER DEFAULT 0,
+            last_check_date VARCHAR(20) DEFAULT ''
         )
     """)
     
@@ -283,6 +287,18 @@ if DATABASE_URL:
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            amount INTEGER,
+            tariff_id INTEGER,
+            status TEXT,
+            created_at TEXT,
+            payme_id TEXT
+        )
+    """)
+    
 else:
     # Lokal SQLite uchun
     import sqlite3
@@ -300,7 +316,9 @@ else:
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER DEFAULT 0,
+            last_check_date VARCHAR(20) DEFAULT ''
         )
     """)
     
@@ -408,6 +426,18 @@ else:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             price INTEGER NOT NULL,
             days INTEGER NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id BIGINT,
+            amount INTEGER,
+            tariff_id INTEGER,
+            status TEXT,
+            created_at TEXT,
+            payme_id TEXT
         )
     """)
 
@@ -581,6 +611,65 @@ def get_premium_text():
     """Premium matnini olish"""
     result = fetch_one("SELECT text, photo_id, caption FROM premium_texts ORDER BY id DESC LIMIT 1")
     return result
+
+# ---------- PAYME DATABASE FUNCTIONS ----------
+def db_create_transaction(user_id, amount, tariff_id=None):
+    execute_query(
+        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at) VALUES (%s, %s, %s, 'pending', %s)" if DATABASE_URL else 
+        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+        (user_id, amount, tariff_id, datetime.utcnow().isoformat())
+    )
+    row = fetch_one("SELECT id FROM transactions WHERE user_id=%s ORDER BY id DESC LIMIT 1" if DATABASE_URL else 
+                   "SELECT id FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
+    return row[0] if row else None
+
+def db_get_transaction(t_id):
+    return fetch_one("SELECT user_id, amount, status, tariff_id FROM transactions WHERE id=%s" if DATABASE_URL else 
+                    "SELECT user_id, amount, status, tariff_id FROM transactions WHERE id=?", (t_id,))
+
+def db_get_transaction_payme_id(t_id):
+    row = fetch_one("SELECT payme_id FROM transactions WHERE id=%s" if DATABASE_URL else 
+                   "SELECT payme_id FROM transactions WHERE id=?", (t_id,))
+    return row[0] if row else None
+
+def db_update_transaction_status(t_id, status):
+    execute_query("UPDATE transactions SET status=%s WHERE id=%s" if DATABASE_URL else 
+                 "UPDATE transactions SET status=? WHERE id=?", (status, t_id))
+
+def db_update_transaction_payme_id(t_id, payme_id):
+    execute_query("UPDATE transactions SET payme_id=%s WHERE id=%s" if DATABASE_URL else 
+                 "UPDATE transactions SET payme_id=? WHERE id=?", (payme_id, t_id))
+
+def db_get_transaction_by_payme_id(payme_id):
+    return fetch_one("SELECT id, user_id, amount, status, created_at, tariff_id FROM transactions WHERE payme_id=%s" if DATABASE_URL else 
+                    "SELECT id, user_id, amount, status, created_at, tariff_id FROM transactions WHERE payme_id=?", (payme_id,))
+
+def db_update_balance(user_id, amount):
+    execute_query("UPDATE users SET balance = balance + %s WHERE user_id = %s" if DATABASE_URL else 
+                 "UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+
+def db_get_balance(user_id):
+    row = fetch_one("SELECT balance FROM users WHERE user_id = %s" if DATABASE_URL else 
+                   "SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    return row[0] if row else 0
+
+def db_get_transactions_by_time_range(from_ms, to_ms):
+    rows = fetch_all("SELECT id, user_id, amount, status, created_at, payme_id FROM transactions WHERE payme_id IS NOT NULL AND created_at IS NOT NULL")
+    result = []
+    for row in rows:
+        t_id, user_id, amount, status, created_at, payme_id = row
+        if not created_at: continue
+        try:
+            from datetime import datetime as _dt
+            dt = _dt.fromisoformat(created_at if '+' in created_at or 'Z' in created_at else created_at + '+00:00')
+            ts_ms = int(dt.timestamp() * 1000)
+        except Exception: continue
+        if from_ms <= ts_ms <= to_ms:
+            result.append((t_id, user_id, amount, status, created_at, payme_id, ts_ms))
+    return result
+
+def db_get_tariffs():
+    return fetch_all("SELECT id, price, days FROM tariffs")
 
 def get_share_keyboard(video_code):
     """Do'stlarga yuborish tugmasi va havolasini yaratish"""
@@ -841,6 +930,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price, days = tariff
         keyboard = [
             [InlineKeyboardButton("💳 Click Avtomat", callback_data=f"click_auto_{tariff_id}")],
+            [InlineKeyboardButton("💎 Payme Avtomat", callback_data=f"payme_auto_{tariff_id}")],
             [InlineKeyboardButton("💵 Karta raqam orqali", callback_data=f"click_manual_{tariff_id}")]
         ]
         await query.message.reply_text(
@@ -869,6 +959,37 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [
             [InlineKeyboardButton("💳 Click orqali to'lash", url=click_app_url)]
+        ]
+        await query.message.reply_text(
+            f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lash uchun tugmani bosing 👇",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    elif data.startswith("payme_auto_"):
+        tariff_id = int(data.split("_")[2])
+        tariff = fetch_one("SELECT price, days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT price, days FROM tariffs WHERE id=?", (tariff_id,))
+        if not tariff:
+            return
+        price, days = tariff
+        
+        # 1. Tranzaksiya yaratish
+        order_id = db_create_transaction(user_id, price, tariff_id)
+        
+        # 2. Payme linkini yaratish
+        # m = MERCHANT_ID
+        # ac.order_id = order_id
+        # a = price * 100 (tiyinda)
+        import base64
+        payme_merchant_id = PAYME_MERCHANT_ID
+        amount_tiyin = price * 100
+        
+        params = f"m={payme_merchant_id};ac.order_id={order_id};a={amount_tiyin}"
+        encoded_params = base64.b64encode(params.encode()).decode()
+        payme_url = f"https://checkout.payme.uz/{encoded_params}"
+        
+        keyboard = [
+            [InlineKeyboardButton("💎 Payme orqali to'lash", url=payme_url)]
         ]
         await query.message.reply_text(
             f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lash uchun tugmani bosing 👇",
@@ -2603,13 +2724,393 @@ def click_complete():
         except Exception as e:
             print("❌ Click complete update error:", e)
     
+def json_rpc_error(req_id, code, message, req_data=None):
     return jsonify({
-        "click_trans_id": int(click_trans_id),
-        "merchant_trans_id": merchant_trans_id,
-        "merchant_confirm_id": int(click_trans_id),
-        "error": 0,
-        "error_note": "Success"
+        "error": {
+            "code": code,
+            "message": {"uz": message, "ru": message, "en": message},
+            "data": req_data
+        },
+        "id": req_id
     })
+
+def get_time_ms_from_iso(iso_str):
+    if not iso_str:
+        return 0
+    try:
+        # iso parsing with fake UTC
+        from datetime import datetime as _dt
+        dt = _dt.fromisoformat(iso_str if '+' in iso_str or 'Z' in iso_str else iso_str + '+00:00')
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return 0
+
+@web_app.route("/payme/api", methods=["POST"])
+def payme_handler():
+    # Authorization header
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Basic '):
+        return json_rpc_error(None, -32504, "Insufficient privilege")
+
+    import base64
+    encoded_cred = auth_header.split(' ')[1]
+    try:
+        decoded_cred = base64.b64decode(encoded_cred).decode('utf-8')
+        login, password = decoded_cred.split(':', 1)
+    except Exception:
+        return json_rpc_error(None, -32504, "Invalid Authorization format")
+
+    if login != 'Paycom' or password != PAYME_TOKEN:
+        return json_rpc_error(None, -32504, "Insufficient privilege")
+         
+    req_data = request.json
+    if not req_data:
+        return json_rpc_error(None, -32700, "Parse error")
+        
+    method = req_data.get('method')
+    params = req_data.get('params', {})
+    req_id = req_data.get('id')
+    
+    if not method:
+        return json_rpc_error(req_id, -32600, "Invalid request")
+
+    try:
+        if method == "CheckPerformTransaction":
+            amount = params.get('amount')
+            account = params.get('account', {})
+            t_id_str = account.get('order_id')
+            
+            if not t_id_str:
+                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                
+            try:
+                t_id = int(t_id_str)
+                transaction = db_get_transaction(t_id)
+            except Exception:
+                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                
+            if not transaction:
+                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                
+            expected_amount = transaction[1] * 100 
+            status = transaction[2]
+            
+            if int(amount) != expected_amount:
+                return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
+                
+            if status != "pending":
+                return json_rpc_error(req_id, -31008, "Order is not pending")
+                
+            return jsonify({
+                "result": {
+                    "allow": True
+                },
+                "id": req_id
+            })
+
+        elif method == "CreateTransaction":
+            payme_t_id = params.get('id')
+            time_ms = params.get('time')
+            amount = params.get('amount')
+            account = params.get('account', {})
+            t_id_str = account.get('order_id')
+            
+            if not t_id_str:
+                return json_rpc_error(req_id, -31050, "Order not found", "account")
+
+            # 1-qadam: Avval shu payme_t_id bilan yaratilganmi?
+            existing_tx = db_get_transaction_by_payme_id(payme_t_id)
+            if existing_tx:
+                t_id_val = existing_tx[0]
+                status = existing_tx[3]
+                created_at = existing_tx[4]
+                create_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+                
+                if status != "pending" and status != "paid":
+                    return json_rpc_error(req_id, -31008, "Transaction order cannot perform", "account")
+                    
+                return jsonify({
+                    "result": {
+                        "create_time": create_time,
+                        "transaction": str(t_id_val),
+                        "state": 1 if status == "pending" else 2
+                    },
+                    "id": req_id
+                })
+
+            # 2-qadam: Avval yaratilmagan. Buyurtmani qidiramiz
+            try:
+                t_id = int(t_id_str)
+                transaction = db_get_transaction(t_id)
+            except Exception:
+                return json_rpc_error(req_id, -31050, "Order not found", "account")
+
+            if not transaction:
+                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                
+            # 3-qadam: Boshqa payme_t_id bilan bandmi?
+            current_payme_id = db_get_transaction_payme_id(t_id)
+                
+            if current_payme_id and current_payme_id != payme_t_id:
+                return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+                
+            expected_amount = transaction[1] * 100
+            status = transaction[2]
+            
+            if int(amount) != expected_amount:
+                return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
+                
+            if status != "pending":
+                return json_rpc_error(req_id, -31008, "Order is not pending")
+                
+            db_update_transaction_payme_id(t_id, payme_t_id)
+            
+            fresh_tx = db_get_transaction_by_payme_id(payme_t_id)
+            created_at = fresh_tx[4] if fresh_tx else None
+            create_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+                
+            return jsonify({
+                "result": {
+                    "create_time": create_time, 
+                    "transaction": str(t_id_str),
+                    "state": 1
+                },
+                "id": req_id
+            })
+
+        elif method == "PerformTransaction":
+            payme_t_id = params.get('id')
+            
+            transaction = db_get_transaction_by_payme_id(payme_t_id)
+            if not transaction:
+                return json_rpc_error(req_id, -31003, "Transaction not found")
+                
+            t_id = transaction[0]
+            user_id = transaction[1]
+            amount = transaction[2]
+            status = transaction[3]
+            created_at = transaction[4]
+            tariff_id = transaction[5]
+            perform_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+
+            if status == "paid":
+                 return jsonify({
+                    "result": {
+                        "transaction": str(t_id),
+                        "perform_time": perform_time,
+                        "state": 2
+                    },
+                    "id": req_id
+                 })
+                 
+            if status != "pending":
+                 return json_rpc_error(req_id, -31008, "Transaction cancelled or failed")
+
+            db_update_transaction_status(t_id, "paid")
+            
+            # Agar tariff_id bo'lsa, avtomatik premium berish
+            premium_activated = False
+            days = 0
+            if tariff_id:
+                tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
+                if tariff:
+                    days = tariff[0]
+                    expiry_date = datetime.now() + timedelta(days=days)
+                    
+                    # Premium jadvalini yangilash
+                    if DATABASE_URL:
+                        execute_query("""
+                            INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (user_id) DO UPDATE SET 
+                            expiry_date = EXCLUDED.expiry_date,
+                            approved_date = EXCLUDED.approved_date
+                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                    else:
+                        execute_query("""
+                            INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
+                            VALUES (?, ?, ?, ?)
+                        """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                    premium_activated = True
+
+            # Balansni ham yangilaymiz (ehtiyot shart)
+            db_update_balance(user_id, amount)
+            new_balance = db_get_balance(user_id)
+            
+            # User notification via Telegram API
+            try:
+                # Flaskda bot_app ga to'g'ridan-to'g'ri ulanish qiyin bo'lishi mumkin, 
+                # shuning uchun requests orqali yoki bot ob'ekti orqali yuboramiz.
+                # Bizda BOT_TOKEN bor.
+                
+                # Tariffs for keyboard
+                tariffs = db_get_tariffs()
+                from keyboards import vip_tariffs_buttons
+                # InlineKeyboardMarkup ni dict ko'rinishiga o'tkazamiz
+                markup = vip_tariffs_buttons(tariffs).to_dict() if tariffs else None
+                
+                if premium_activated:
+                    msg_text = (
+                        f"🎉 Payme orqali to'lovingiz muvaffaqiyatli qabul qilindi!\n\n"
+                        f"✅ Sizga {days} kunlik premium obuna faollashtirildi.\n"
+                        f"Endi botdan reklamalarsiz foydalanishingiz mumkin!"
+                    )
+                else:
+                    msg_text = (
+                        f"🎉 Payme orqali to'lovingiz muvaffaqiyatli qabul qilindi!\n\n"
+                        f"💳 Balansga qo'shildi: {amount} so'm\n"
+                        f"💰 Joriy balansingiz: {new_balance} so'm\n\n"
+                        f"💎 Quyidagi VIP paketlardan birini xarid qilishingiz mumkin:"
+                    )
+                
+                payload = {
+                    "chat_id": user_id,
+                    "text": msg_text,
+                    "reply_markup": json.dumps(markup) if markup else None
+                }
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=payload)
+                
+                # Admin notify
+                admin_msg = (
+                    f"💰 <b>PAYME MERCHANT TO'LOV KELDI!</b>\n\n"
+                    f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
+                    f"📥 <b>Buyurtma:</b> {t_id}\n"
+                    f"💵 <b>Summa:</b> {amount} so'm\n"
+                )
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_msg)}&parse_mode=HTML")
+                
+            except Exception as e:
+                print(f"Payme notify error: {e}")
+
+            return jsonify({
+                "result": {
+                    "transaction": str(t_id),
+                    "perform_time": perform_time,
+                    "state": 2
+                },
+                "id": req_id
+            })
+
+        elif method == "CancelTransaction":
+            payme_t_id = params.get('id')
+            transaction = db_get_transaction_by_payme_id(payme_t_id)
+            if not transaction:
+                return json_rpc_error(req_id, -31003, "Transaction not found")
+            
+            t_id_val = transaction[0]
+            status = transaction[3]
+            created_at = transaction[4]
+            cancel_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+            
+            if status == "cancelled":
+                 return jsonify({
+                     "result": {
+                         "transaction": str(t_id_val),
+                         "cancel_time": cancel_time,
+                         "state": -1
+                     },
+                     "id": req_id
+                 })
+                 
+            if status == "paid":
+                 return json_rpc_error(req_id, -31007, "Transaction can not be cancelled")
+                 
+            db_update_transaction_status(t_id_val, "cancelled")
+            
+            return jsonify({
+                "result": {
+                    "transaction": str(t_id_val),
+                    "cancel_time": cancel_time,
+                    "state": -1
+                },
+                "id": req_id
+            })
+            
+        elif method == "CheckTransaction":
+            payme_t_id = params.get('id')
+            transaction = db_get_transaction_by_payme_id(payme_t_id)
+            if not transaction:
+                return json_rpc_error(req_id, -31003, "Transaction not found")
+                
+            t_id_val = transaction[0]
+            status = transaction[3]
+            created_at = transaction[4]
+            create_time = get_time_ms_from_iso(created_at) if get_time_ms_from_iso(created_at) else int(time.time() * 1000)
+            
+            state = 1
+            if status == "paid":
+                 state = 2
+            elif status == "cancelled":
+                 state = -1
+                 
+            return jsonify({
+                "result": {
+                    "create_time": create_time,
+                    "perform_time": 0 if state != 2 else create_time,
+                    "cancel_time": 0 if state != -1 else create_time,
+                    "transaction": str(t_id_val),
+                    "state": state,
+                    "reason": 3 if state == -1 else None
+                },
+                "id": req_id
+            })
+
+        elif method == "GetStatement":
+            from_ms = params.get('from', 0)
+            to_ms = params.get('to', int(time.time() * 1000))
+            
+            rows = db_get_transactions_by_time_range(from_ms, to_ms)
+            
+            transactions_list = []
+            for row in rows:
+                t_id, user_id, amount, status, created_at, payme_id, ts_ms = row
+                state = 1
+                if status == "paid":
+                    state = 2
+                elif status == "cancelled":
+                    state = -1
+                    
+                transactions_list.append({
+                    "id": payme_id,
+                    "time": ts_ms,
+                    "amount": amount * 100,
+                    "account": {"order_id": str(t_id)},
+                    "create_time": ts_ms,
+                    "perform_time": ts_ms if state == 2 else 0,
+                    "cancel_time": ts_ms if state == -1 else 0,
+                    "transaction": str(t_id),
+                    "state": state,
+                    "reason": 3 if state == -1 else None,
+                    "receivers": None
+                })
+            
+            return jsonify({
+                "result": {
+                    "transactions": transactions_list
+                },
+                "id": req_id
+            })
+            
+        elif method == "ChangePassword":
+            return jsonify({
+                "result": {
+                    "success": True
+                },
+                "id": req_id
+            })
+
+        return json_rpc_error(req_id, -32601, "Method not found")
+
+    except Exception as e:
+        print(f"Payme internal error: {e}")
+        return jsonify({
+            "error": {
+                "code": -32603,
+                "message": {"uz": str(e), "ru": str(e), "en": str(e)},
+                "data": None
+            },
+            "id": req_id
+        })
 
 def run_flask_app():
     port = int(os.environ.get("PORT", 8080))
@@ -2627,6 +3128,12 @@ if __name__ == '__main__':
     
     # 1. Database jadvallarini tekshirish
     print("🔍 Database jadvallarini tekshirilmoqda...")
+    try:
+        execute_query("ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
+        print("✅ users jadvaliga balance qo'shildi.")
+    except Exception:
+        pass # Allaqachon mavjud
+        
     try:
         if DATABASE_URL:
             execute_query("ALTER TABLE users ADD COLUMN last_check_date VARCHAR(20) DEFAULT ''")
