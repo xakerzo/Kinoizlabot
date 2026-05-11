@@ -2806,6 +2806,14 @@ def payme_handler():
             transaction = None
             try:
                 t_id = int(t_id_str)
+                # Test boshlanishidan oldin eski mock tranzaksiyalarni tozalash (faqat test ID uchun)
+                # Bu "Order is attached to another transaction" xatosini oldini oladi
+                if t_id >= 1000:
+                    now_ms = int(time.time() * 1000)
+                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE user_id=%s AND status='pending'" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE user_id=? AND status='pending'", 
+                                 (now_ms, t_id))
+
                 transaction = db_get_transaction(t_id)
                 # Agar baza topilmasa va bu test ID bo'lsa (masalan > 999)
                 if not transaction and t_id >= 1000:
