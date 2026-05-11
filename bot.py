@@ -2857,7 +2857,7 @@ def payme_handler():
             time_ms = params.get('time')
             amount = params.get('amount')
             account = params.get('account', {})
-            t_id_str = account.get('som')
+            t_id_str = account.get('order_id') or account.get('som') or account.get('id')
             req_id = data.get('id')
 
             if not t_id_str:
