@@ -630,8 +630,8 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
     return row[0] if row else None
 
 def db_get_transaction(t_id):
-    return fetch_one("SELECT user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=%s" if DATABASE_URL else 
-                    "SELECT user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=?", (t_id,))
+    return fetch_one("SELECT id, user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=%s" if DATABASE_URL else 
+                    "SELECT id, user_id, amount, status, tariff_id, created_at FROM transactions WHERE id=?", (t_id,))
 
 def db_get_transaction_payme_id(t_id):
     row = fetch_one("SELECT payme_id FROM transactions WHERE id=%s" if DATABASE_URL else 
@@ -2812,8 +2812,8 @@ def payme_handler():
             if not transaction:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
                 
-            expected_amount = transaction[1] * 100 
-            status = transaction[2]
+            expected_amount = transaction[2] * 100 
+            status = transaction[3]
             
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
@@ -2880,9 +2880,9 @@ def payme_handler():
             if current_payme_id and current_payme_id != payme_t_id:
                 return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
                 
-            expected_amount = transaction[1] * 100
-            status = transaction[2]
-            create_time = int(transaction[4])
+            expected_amount = transaction[2] * 100
+            status = transaction[3]
+            create_time = int(transaction[5])
             
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
