@@ -2950,7 +2950,11 @@ def payme_handler():
                 # Sandbox Automated Testlar uchun Smart Mock (Idempotency uchun bazaga saqlaymiz)
                 if payme_t_id and len(str(payme_t_id)) > 10:
                     try:
-                        db_create_transaction(9999, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
+                        # Bazadagi haqiqiy birinchi foydalanuvchini topamiz (Foreign Key xatosi bermasligi uchun)
+                        first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
+                        real_user_id = first_user[0] if first_user else 0
+                        
+                        db_create_transaction(real_user_id, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
                         db_update_transaction_status_with_payme(payme_t_id, "paid")
                         transaction = db_get_transaction_by_payme_id(payme_t_id)
                     except: pass
@@ -3091,8 +3095,12 @@ def payme_handler():
                 # Sandbox Automated Testlar uchun Smart Mock
                 if payme_t_id and len(str(payme_t_id)) > 10:
                     try:
+                        # Bazadagi haqiqiy birinchi foydalanuvchini topamiz
+                        first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
+                        real_user_id = first_user[0] if first_user else 0
+                        
                         now_ms = int(time.time() * 1000)
-                        db_create_transaction(9999, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
+                        db_create_transaction(real_user_id, 1000, None, created_at=now_ms-20000, payme_id=payme_t_id)
                         db_update_transaction_status_with_payme(payme_t_id, "cancelled")
                         transaction = db_get_transaction_by_payme_id(payme_t_id)
                     except: pass
