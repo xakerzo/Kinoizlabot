@@ -638,6 +638,10 @@ def db_get_transaction_payme_id(t_id):
                    "SELECT payme_id FROM transactions WHERE id=?", (t_id,))
     return row[0] if row else None
 
+def db_get_pending_transaction_by_account(account_id):
+    return fetch_one("SELECT id, payme_id FROM transactions WHERE (id=%s OR user_id=%s) AND status='pending' LIMIT 1" if DATABASE_URL else 
+                    "SELECT id, payme_id FROM transactions WHERE (id=? OR user_id=?) AND status='pending' LIMIT 1", (account_id, account_id))
+
 def db_update_transaction_status(t_id, status):
     now_ms = int(time.time() * 1000)
     if status == "paid":
@@ -2866,7 +2870,8 @@ def payme_handler():
                 transaction = db_get_transaction(t_id_int)
                 if not transaction and t_id_int >= 1000:
                     # Bazada yo'q test buyurtmani yaratib qo'yamiz (CheckTransaction uchun)
-                    db_create_transaction(0, 1000, None, created_at=time_ms, payme_id=payme_t_id)
+                    # Test ID ni user_id sifatida saqlaymiz, shunda db_get_pending_transaction_by_account uni topadi
+                    db_create_transaction(t_id_int, 1000, None, created_at=time_ms, payme_id=payme_t_id)
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
                     if not transaction:
                         # Fallback: Bazadan topilmasa, vaqtinchalik mock tuple yaratamiz
@@ -2881,9 +2886,10 @@ def payme_handler():
                 
             # 3-qadam: Boshqa payme_t_id bilan bandmi?
             t_id = transaction[0]
-            current_payme_id = db_get_transaction_payme_id(t_id)
+            # Account uchun har qanday ochiq tranzaksiyani tekshirish
+            pending_tx = db_get_pending_transaction_by_account(t_id_int)
                 
-            if current_payme_id and current_payme_id != payme_t_id:
+            if pending_tx and pending_tx[1] != payme_t_id:
                 return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
                 
             expected_amount = transaction[2] * 100
