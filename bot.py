@@ -623,13 +623,13 @@ def get_premium_text():
     return result
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
-def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None, forced_id=None):
-    # Yangi buyurtma ochishdan oldin eskilarni o'chirib tashlaymiz
+def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None, forced_id=None, provider='payme'):
+    # Faqat tanlangan provider'ga tegishli eski buyurtmalarni o'chirib tashlaymiz
     try:
         if DATABASE_URL:
-            execute_query("DELETE FROM transactions WHERE user_id=%s AND status='pending'", (user_id,))
+            execute_query("DELETE FROM transactions WHERE user_id=%s AND status='pending' AND provider=%s", (user_id, provider))
         else:
-            execute_query("DELETE FROM transactions WHERE user_id=? AND status='pending'", (user_id,))
+            execute_query("DELETE FROM transactions WHERE user_id=? AND status='pending' AND provider=?", (user_id, provider))
     except: pass
     
     now_ms = created_at if created_at else int(time.time() * 1000)
@@ -637,14 +637,14 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
         if forced_id:
             # Sandbox uchun: ID ni majburan o'zimiz beramiz
             execute_query(
-                "INSERT INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, %s, 'pending', %s, %s) ON CONFLICT (id) DO UPDATE SET amount=EXCLUDED.amount, status='pending'",
-                (forced_id, user_id, amount, tariff_id, now_ms, payme_id)
+                "INSERT INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id, provider) VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s) ON CONFLICT (id) DO UPDATE SET amount=EXCLUDED.amount, status='pending', provider=EXCLUDED.provider",
+                (forced_id, user_id, amount, tariff_id, now_ms, payme_id, provider)
             )
             return forced_id
             
         row = fetch_one(
-            "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, 'pending', %s, %s) RETURNING id",
-            (user_id, amount, tariff_id, now_ms, payme_id)
+            "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id, provider) VALUES (%s, %s, %s, 'pending', %s, %s, %s) RETURNING id",
+            (user_id, amount, tariff_id, now_ms, payme_id, provider)
         )
         return row[0] if row else None
     else:
@@ -1009,7 +1009,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price, days = tariff
         
         # Click uchun ham buyurtma yaratamiz
-        order_id = db_create_transaction(user_id, price, int(tariff_id))
+        order_id = db_create_transaction(user_id, price, int(tariff_id), provider='click')
         
         amount = price
         merchant_id = CLICK_MERCHANT_ID
@@ -1039,7 +1039,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price, days = tariff
         
         # 1. Tranzaksiya yaratish
-        order_id = db_create_transaction(user_id, price, tariff_id)
+        order_id = db_create_transaction(user_id, price, tariff_id, provider='payme')
         
         # 2. Payme linkini yaratish
         import base64
@@ -1279,11 +1279,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "owner_delete_insta":
         context.user_data.clear()
         context.user_data["action"] = "delete_insta"
-        await query.message.edit_text("� O'chiriladigan Instagram linkini yozing:", reply_markup=create_keyboard("channel_actions"))
+        await query.message.edit_text(" O'chiriladigan Instagram linkini yozing:", reply_markup=create_keyboard("channel_actions"))
         return
     
     elif data == "owner_caption":
-        await query.message.edit_text("�📝 Video ostidagi matn (videodan keyin chiqadigan matn):", reply_markup=create_keyboard("video_caption_actions"))
+        await query.message.edit_text("📝 Video ostidagi matn (videodan keyin chiqadigan matn):", reply_markup=create_keyboard("video_caption_actions"))
         return
     
     elif data == "owner_add_caption":
@@ -2951,7 +2951,7 @@ def payme_handler():
                         try:
                             first_user = fetch_one("SELECT user_id FROM users LIMIT 1")
                             u_id = first_user[0] if first_user else OWNER_ID
-                            db_create_transaction(u_id, actual_amt, None, created_at=stable_create, payme_id=payme_t_id, forced_id=t_id_int)
+                            db_create_transaction(u_id, actual_amt, None, created_at=stable_create, payme_id=payme_t_id, forced_id=t_id_int, provider='payme')
                             transaction = db_get_transaction(t_id_int)
                         except: pass
                     
@@ -2993,6 +2993,11 @@ def payme_handler():
                     return json_rpc_error(req_id, -31050, "Order is already finished", "account")
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
+            
+            # transactions jadvaliga provider ustunini qo'shish (agar yo'q bo'lsa)
+            try:
+                execute_query("ALTER TABLE transactions ADD COLUMN provider TEXT DEFAULT 'payme'")
+            except: pass
             
             # Bazadagi yaratilgan vaqtni olamiz (u yangilangan yoki eskisi)
             stable_create = int(transaction[5]) if len(transaction) > 5 and transaction[5] else int(time.time() * 1000)
