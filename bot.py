@@ -624,6 +624,14 @@ def get_premium_text():
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
 def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None, forced_id=None, provider='payme'):
+    # Majburiy ustun qo'shish (PostgreSQL va SQLite uchun)
+    try:
+        if DATABASE_URL:
+            execute_query("ALTER TABLE transactions ADD COLUMN provider TEXT DEFAULT 'payme'")
+        else:
+            execute_query("ALTER TABLE transactions ADD COLUMN provider TEXT DEFAULT 'payme'")
+    except: pass
+
     # Faqat tanlangan provider'ga tegishli eski buyurtmalarni o'chirib tashlaymiz
     try:
         if DATABASE_URL:
@@ -649,10 +657,6 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
         return row[0] if row else None
     else:
         # SQLite branch
-        try:
-            # Ustun borligini tekshiramiz
-            execute_query("ALTER TABLE transactions ADD COLUMN provider TEXT DEFAULT 'payme'")
-        except: pass
 
         if forced_id:
             execute_query(
