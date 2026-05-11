@@ -2778,15 +2778,15 @@ def click_complete():
                 # Adminga xabar yozish
                 admin_text = (
                     f"💰 <b>CLICK TO'LOV KELDI!</b>\n\n"
-                        f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
-                        f"💳 <b>Summa:</b> {amount} so'm\n"
-                        f"🎫 <b>Tarif:</b> {days} kun\n"
-                        f"📊 <b>Tranzaksiya:</b> <code>{click_trans_id}</code>\n\n"
-                        f"✅ Userga obunasi avtomatik berildi."
-                    )
-                    requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_text)}&parse_mode=HTML")
-                    
-                    print(f"✅ COMPLETE Muvaffaqiyatli: {user_id} unga {days} kun berildi")
+                    f"👤 <b>User ID:</b> <code>{user_id}</code>\n"
+                    f"💳 <b>Summa:</b> {amount} so'm\n"
+                    f"🎫 <b>Tarif:</b> {days} kun\n"
+                    f"📊 <b>Tranzaksiya:</b> <code>{click_trans_id}</code>\n\n"
+                    f"✅ Userga obunasi avtomatik berildi."
+                )
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={OWNER_ID}&text={urllib.parse.quote(admin_text)}&parse_mode=HTML")
+                
+                print(f"✅ COMPLETE Muvaffaqiyatli: {user_id} unga {days} kun berildi")
         except Exception as e:
             print("❌ Click complete update error:", e)
     
