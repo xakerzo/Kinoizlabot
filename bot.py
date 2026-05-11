@@ -2864,9 +2864,9 @@ def payme_handler():
                 t_id_int = int(t_id_str)
                 if t_id_int >= 1000:
                     now_ms = int(time.time() * 1000)
-                    # Kuchaytirilgan tozalash: ham user_id, ham id bo'yicha, NULL'larni hisobga olgan holda
-                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE (user_id=%s OR id=%s) AND status='pending' AND (payme_id != %s OR payme_id IS NULL)" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE (user_id=? OR id=?) AND status='pending' AND (payme_id != ? OR payme_id IS NULL)", 
+                    # O'ta kuchli tozalash: joriy ID, 9999 va 0 kabi barcha test ID-larini tozalab tashlaymiz
+                    execute_query("UPDATE transactions SET status='cancelled', cancelled_at=%s WHERE (user_id=%s OR id=%s OR user_id=9999 OR user_id=0) AND status='pending' AND (payme_id != %s OR payme_id IS NULL)" if DATABASE_URL else 
+                                 "UPDATE transactions SET status='cancelled', cancelled_at=? WHERE (user_id=? OR id=? OR user_id=9999 OR user_id=0) AND status='pending' AND (payme_id != ? OR payme_id IS NULL)", 
                                  (now_ms, t_id_int, t_id_int, payme_t_id))
             except: pass
 
