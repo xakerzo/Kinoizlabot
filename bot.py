@@ -2972,16 +2972,19 @@ def payme_handler():
             if int(amount) != expected_amount:
                 return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
                 
-            # 1. Boshqa payme_id bilan bandmi? (Pending holatda)
-            if status == "pending" and transaction[6] and transaction[6] != payme_t_id:
+            # 1. Boshqa payme_id bilan bandmi? (Pending holatda har doim tekshiramiz)
+            # transaction[6] - bu payme_id ustuni
+            if status == "pending" and str(transaction[6]) != str(payme_t_id):
                 return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
 
             if status != "pending":
                 # Sandbox uchun: Agar test ID bo'lsa, holatni va vaqtni yangilaymiz (Fresh Start)
                 if t_id >= 1000:
                     stable_create = int(time_ms) if time_ms else int(time.time() * 1000)
-                    execute_query("UPDATE transactions SET status='pending', payme_id=%s, performed_at=NULL, cancelled_at=NULL, created_at=%s WHERE id=%s" if DATABASE_URL else 
-                                 "UPDATE transactions SET status='pending', payme_id=?, performed_at=NULL, cancelled_at=NULL, created_at=? WHERE id=?", (payme_t_id, stable_create, t_id))
+                    sql = "UPDATE transactions SET status='pending', payme_id=%s, created_at=%s, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else \
+                          "UPDATE transactions SET status='pending', payme_id=?, created_at=?, performed_at=NULL, cancelled_at=NULL WHERE id=?"
+                    execute_query(sql, (payme_t_id, stable_create, t_id))
+                    
                     # Bazadan yangilangan ma'lumotni qayta o'qiymiz
                     transaction = db_get_transaction(t_id)
                     status = "pending"
