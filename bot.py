@@ -3328,6 +3328,6 @@ if __name__ == '__main__':
     # 3. Botni ishga tushirish
     try:
         print("🚀 Bot ishga tushmoqda...")
-        app.run_polling()
+        app.run_polling(drop_pending_updates=True)
     except Exception as e:
         print(f"❌ Bot ishga tushishda xatolik: {e}")
