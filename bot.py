@@ -648,17 +648,17 @@ def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, paym
         )
         return row[0] if row else None
     else:
-        # SQLite uchun
+        # SQLite
         if forced_id:
             execute_query(
-                "INSERT OR REPLACE INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-                (forced_id, user_id, amount, tariff_id, now_ms, payme_id)
+                "INSERT OR REPLACE INTO transactions (id, user_id, amount, tariff_id, status, created_at, payme_id, provider) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
+                (forced_id, user_id, amount, tariff_id, now_ms, payme_id, provider)
             )
             return forced_id
             
         execute_query(
-            "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, 'pending', ?, ?)",
-            (user_id, amount, tariff_id, now_ms, payme_id)
+            "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id, provider) VALUES (?, ?, ?, 'pending', ?, ?, ?)",
+            (user_id, amount, tariff_id, now_ms, payme_id, provider)
         )
         row = fetch_one("SELECT last_insert_rowid()")
         return row[0] if row else None
