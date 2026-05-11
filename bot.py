@@ -618,12 +618,12 @@ def get_premium_text():
     return result
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
-def db_create_transaction(user_id, amount, tariff_id=None):
-    now_ms = int(time.time() * 1000)
+def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None):
+    now_ms = created_at if created_at else int(time.time() * 1000)
     execute_query(
-        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at) VALUES (%s, %s, %s, 'pending', %s)" if DATABASE_URL else 
-        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
-        (user_id, amount, tariff_id, now_ms)
+        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (%s, %s, %s, 'pending', %s, %s)" if DATABASE_URL else 
+        "INSERT INTO transactions (user_id, amount, tariff_id, status, created_at, payme_id) VALUES (?, ?, ?, 'pending', ?, ?)",
+        (user_id, amount, tariff_id, now_ms, payme_id)
     )
     row = fetch_one("SELECT id FROM transactions WHERE user_id=%s ORDER BY id DESC LIMIT 1" if DATABASE_URL else 
                    "SELECT id FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
@@ -2861,14 +2861,12 @@ def payme_handler():
             # Sandbox Automated Testlar uchun Smart Mock
             transaction = None
             try:
-                t_id = int(t_id_str)
-                transaction = db_get_transaction(t_id)
-                if not transaction and t_id >= 1000:
+                t_id_int = int(t_id_str)
+                transaction = db_get_transaction(t_id_int)
+                if not transaction and t_id_int >= 1000:
                     # Bazada yo'q test buyurtmani yaratib qo'yamiz (CheckTransaction uchun)
-                    db_create_transaction(0, 1000, None)
-                    transaction = db_get_transaction(t_id)
-                    if not transaction: # Agar hali ham bo'lmasa (serial ID farqi)
-                         transaction = (0, 1000, "pending", 0, int(time.time() * 1000))
+                    db_create_transaction(0, 1000, None, created_at=time_ms, payme_id=payme_t_id)
+                    transaction = db_get_transaction_by_payme_id(payme_t_id)
             except Exception:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
 
@@ -2876,6 +2874,7 @@ def payme_handler():
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
                 
             # 3-qadam: Boshqa payme_t_id bilan bandmi?
+            t_id = transaction[0]
             current_payme_id = db_get_transaction_payme_id(t_id)
                 
             if current_payme_id and current_payme_id != payme_t_id:
