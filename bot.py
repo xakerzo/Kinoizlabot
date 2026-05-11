@@ -1027,14 +1027,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_id = db_create_transaction(user_id, price, tariff_id)
         
         # 2. Payme linkini yaratish
-        # m = MERCHANT_ID
-        # ac.order_id = order_id
-        # a = price * 100 (tiyinda)
         import base64
         payme_merchant_id = PAYME_MERCHANT_ID
-        amount_tiyin = price * 100
+        amount_tiyin = int(price * 100)
         
-        params = f"m={payme_merchant_id};ac.order_id={order_id};a={amount_tiyin}"
+        # Har ehtimolga qarshi barcha kalitlarni beramiz: order_id, id, som
+        params = f"m={payme_merchant_id};ac.order_id={order_id};ac.id={order_id};ac.som={order_id};a={amount_tiyin}"
         encoded_params = base64.b64encode(params.encode()).decode()
         payme_url = f"https://checkout.payme.uz/{encoded_params}"
         
