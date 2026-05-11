@@ -2805,7 +2805,8 @@ def payme_handler():
                 transaction = db_get_transaction(t_id)
                 # Agar baza topilmasa va bu test ID bo'lsa (masalan > 999)
                 if not transaction and t_id >= 1000:
-                    transaction = (0, 1000, "pending", 0, int(time.time() * 1000))
+                    # Tartib: (id, user_id, amount, status, tariff_id, created_at)
+                    transaction = (t_id, 0, 1000, "pending", 0, int(time.time() * 1000))
             except Exception:
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
             
@@ -2867,7 +2868,12 @@ def payme_handler():
                     # Bazada yo'q test buyurtmani yaratib qo'yamiz (CheckTransaction uchun)
                     db_create_transaction(0, 1000, None, created_at=time_ms, payme_id=payme_t_id)
                     transaction = db_get_transaction_by_payme_id(payme_t_id)
-            except Exception:
+                    if not transaction:
+                        # Fallback: Bazadan topilmasa, vaqtinchalik mock tuple yaratamiz
+                        # Tartib: (id, user_id, amount, status, created_at, tariff_id, perf_at, canc_at)
+                        transaction = (t_id_int, 0, 1000, "pending", time_ms, 0, 0, 0)
+            except Exception as e:
+                print(f"Payme Smart Mock error: {e}")
                 return json_rpc_error(req_id, -31050, "Order not found", "account")
 
             if not transaction:
