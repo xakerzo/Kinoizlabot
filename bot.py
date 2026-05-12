@@ -3013,42 +3013,48 @@ def payme_handler():
                 print(f"DEBUG: CreateTransaction logic error: {e}")
 
             if not transaction:
-                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                resp = json_rpc_error(req_id, -31050, "Order not found", "account")
+                print(f"DEBUG: CreateTransaction response (Not Found): {resp.get_data(as_text=True)}")
+                return resp
                 
             t_id = transaction[0]
             status = transaction[3]
             # 1. Avval bandlikni tekshiramiz (Pending holatda)
             payme_id_in_db = transaction[6] # payme_id ustuni
-            if status == "pending" and str(payme_id_in_db) != str(payme_t_id):
-                return json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+            
+            print(f"DEBUG: CreateTransaction: t_id={t_id}, status={status}, db_payme_id={payme_id_in_db}")
+
+            if status == "pending" and payme_id_in_db and str(payme_id_in_db) != str(payme_t_id):
+                resp = json_rpc_error(req_id, -31050, "Order is attached to another transaction", "account")
+                print(f"DEBUG: CreateTransaction response (Attached): {resp.get_data(as_text=True)}")
+                return resp
 
             if status != "pending":
                 # Sandbox uchun: Agar test ID bo'lsa, holatni va vaqtni yangilaymiz (Fresh Start)
                 if t_id >= 1000:
                     stable_create = int(time_ms) if time_ms else int(time.time() * 1000)
-                    # Summani ham yangilaymiz (agar yangi testda boshqa summa bo'lsa)
                     sql = "UPDATE transactions SET status='pending', amount=%s, payme_id=%s, created_at=%s, performed_at=NULL, cancelled_at=NULL WHERE id=%s" if DATABASE_URL else \
                           "UPDATE transactions SET status='pending', amount=?, payme_id=?, created_at=?, performed_at=NULL, cancelled_at=NULL WHERE id=?"
                     execute_query(sql, (actual_amt, payme_t_id, stable_create, t_id))
-                    
-                    # Bazadan yangilangan ma'lumotni qayta o'qiymiz
                     transaction = db_get_transaction(t_id)
                     status = "pending"
                 else:
-                    # Haqiqiy foydalanuvchilar uchun: Agar buyurtma allaqachon yakunlangan bo'lsa
-                    return json_rpc_error(req_id, -31050, "Order is already finished", "account")
+                    resp = json_rpc_error(req_id, -31050, "Order is already finished", "account")
+                    print(f"DEBUG: CreateTransaction response (Finished): {resp.get_data(as_text=True)}")
+                    return resp
             
             # 2. Summani eng oxirida tekshiramiz
             expected_amount = int(transaction[2]) * 100
             if int(amount) != expected_amount:
-                return json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
+                resp = json_rpc_error(req_id, -31001, "Incorrect amount", "amount")
+                print(f"DEBUG: CreateTransaction response (Amount mismatch): {resp.get_data(as_text=True)}")
+                return resp
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
-            # Bazadagi yaratilgan vaqtni olamiz (u yangilangan yoki eskisi)
             stable_create = int(transaction[5]) if len(transaction) > 5 and transaction[5] else int(time.time() * 1000)
             
-            return jsonify({
+            resp = jsonify({
                 "result": {
                     "create_time": stable_create, 
                     "transaction": str(t_id),
@@ -3056,6 +3062,8 @@ def payme_handler():
                 },
                 "id": req_id
             })
+            print(f"DEBUG: CreateTransaction response (Success): {resp.get_data(as_text=True)}")
+            return resp
 
         elif method == "PerformTransaction":
             payme_t_id = params.get('id')
