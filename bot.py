@@ -169,6 +169,17 @@ if DATABASE_URL:
     )
     cursor = conn.cursor()
     
+    # AVVAL BOT_SETTINGS JADVALINI YARATAMIZ (XATOLIK OLDINI OLISH UCHUN)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('payme_enabled', '1') ON CONFLICT (key) DO NOTHING")
+    cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('click_enabled', '1') ON CONFLICT (key) DO NOTHING")
+    conn.commit()
+
     # PostgreSQL uchun jadvallar
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS films (
@@ -310,16 +321,12 @@ if DATABASE_URL:
         )
     """)
     
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bot_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
+    # bot_settings yuqorida yaratildi
+    pass
     
     # Default settings
-    cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('payme_enabled', '1') ON CONFLICT (key) DO NOTHING")
-    cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('click_enabled', '1') ON CONFLICT (key) DO NOTHING")
+    # default settings yuqorida yaratildi
+    pass
     
     # Ensure columns exist (for existing tables)
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
@@ -570,7 +577,13 @@ def reconnect_and_retry(func):
 @reconnect_and_retry
 def execute_query(query, params=None):
     """Barcha SQL so'rovlarni bajarish"""
-    pass
+    # Funksiya decorator tomonidan boshqariladi, 
+    # lekin xavfsizlik uchun bu yerda ham commit qo'shamiz
+    global conn
+    try:
+        conn.commit()
+    except:
+        pass
 
 @reconnect_and_retry
 def fetch_one(query, params=None):
@@ -584,15 +597,38 @@ def fetch_all(query, params=None):
 
 def get_bot_setting(key, default='1'):
     """Bot sozlamasini olish"""
-    result = fetch_one("SELECT value FROM bot_settings WHERE key=%s" if DATABASE_URL else "SELECT value FROM bot_settings WHERE key=?", (key,))
-    return result[0] if result else default
+    try:
+        # Fallback: Agar jadval yo'q bo'lsa (PostgreSQLda ba'zan shunday bo'ladi), yaratib qo'yamiz
+        result = fetch_one("SELECT value FROM bot_settings WHERE key=%s" if DATABASE_URL else "SELECT value FROM bot_settings WHERE key=?", (key,))
+        return result[0] if result and result[0] is not None else default
+    except Exception as e:
+        if "relation \"bot_settings\" does not exist" in str(e) or "no such table" in str(e).lower():
+            try:
+                execute_query("""
+                    CREATE TABLE IF NOT EXISTS bot_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                """)
+                execute_query("INSERT INTO bot_settings (key, value) VALUES ('payme_enabled', '1') ON CONFLICT (key) DO NOTHING" if DATABASE_URL else "INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('payme_enabled', '1')")
+                execute_query("INSERT INTO bot_settings (key, value) VALUES ('click_enabled', '1') ON CONFLICT (key) DO NOTHING" if DATABASE_URL else "INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('click_enabled', '1')")
+            except: pass
+        return default
 
 def set_bot_setting(key, value):
     """Bot sozlamasini yangilash"""
+    val_str = str(value)
     if DATABASE_URL:
-        execute_query("INSERT INTO bot_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (key, str(value)))
+        execute_query("INSERT INTO bot_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (key, val_str))
     else:
-        execute_query("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
+        execute_query("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, val_str))
+    
+    # Keshni tozalash yoki bazani majburiy commit qilish uchun
+    global conn
+    try:
+        conn.commit()
+    except:
+        pass
 
 def is_premium_user(user_id):
     """Premium foydalanuvchini tekshirish"""
@@ -1669,14 +1705,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_val = '0' if current == '1' else '1'
         set_bot_setting('payme_enabled', new_val)
         
-        payme_status = "✅ YOQILGAN" if new_val == '1' else "❌ O'CHIRILGAN"
-        click_status = "✅ YOQILGAN" if get_bot_setting('click_enabled') == '1' else "❌ O'CHIRILGAN"
+        # Holatni bazadan qayta o'qiymiz (tasdiqlash uchun)
+        payme_val = get_bot_setting('payme_enabled')
+        click_val = get_bot_setting('click_enabled')
+        
+        payme_status = "✅ YOQILGAN" if payme_val == '1' else "❌ O'CHIRILGAN"
+        click_status = "✅ YOQILGAN" if click_val == '1' else "❌ O'CHIRILGAN"
         
         text = (
             "⚙️ To'lov tizimlarini boshqarish:\n\n"
             f"💎 Payme: {payme_status}\n"
             f"💳 Click: {click_status}\n\n"
-            "Holat yangilandi!"
+            "✅ Payme holati o'zgartirildi!"
         )
         await query.message.edit_text(text, reply_markup=create_keyboard("payment_settings"))
         return
@@ -1686,14 +1726,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_val = '0' if current == '1' else '1'
         set_bot_setting('click_enabled', new_val)
         
-        payme_status = "✅ YOQILGAN" if get_bot_setting('payme_enabled') == '1' else "❌ O'CHIRILGAN"
-        click_status = "✅ YOQILGAN" if new_val == '1' else "❌ O'CHIRILGAN"
+        # Holatni bazadan qayta o'qiymiz (tasdiqlash uchun)
+        payme_val = get_bot_setting('payme_enabled')
+        click_val = get_bot_setting('click_enabled')
+        
+        payme_status = "✅ YOQILGAN" if payme_val == '1' else "❌ O'CHIRILGAN"
+        click_status = "✅ YOQILGAN" if click_val == '1' else "❌ O'CHIRILGAN"
         
         text = (
             "⚙️ To'lov tizimlarini boshqarish:\n\n"
             f"💎 Payme: {payme_status}\n"
             f"💳 Click: {click_status}\n\n"
-            "Holat yangilandi!"
+            "✅ Click holati o'zgartirildi!"
         )
         await query.message.edit_text(text, reply_markup=create_keyboard("payment_settings"))
         return
