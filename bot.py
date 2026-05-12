@@ -37,7 +37,7 @@ OWNER_KEYBOARD = {
         [("🔤 Startdagi xabar", "owner_start"), ("⭐ Premium matn", "owner_premium_text")],
         [("📝 Caption matn", "owner_caption_text"), ("🎫 Premium boshqaruv", "owner_premium_mgmt")],  # YANGI TUGMA
         [("📊 Statistika", "owner_stats"), ("👥 Bot foydalanuvchilar", "owner_users")],
-        [("💳 Tariflar rejasi", "owner_tariffs")]
+        [("💳 Tariflar rejasi", "owner_tariffs"), ("⚙️ To'lov sozlamalari", "owner_payment_settings")]
     ],
     "video_actions": [
         [("📤 Video yuklash", "owner_upload"), ("🔍 Video qidirish", "owner_search")],
@@ -90,6 +90,10 @@ OWNER_KEYBOARD = {
     "tariff_actions": [
         [("➕ Tarif qo'shish", "owner_add_tariff"), ("🔍 Tariflarni ko'rish", "owner_view_tariffs")],
         [("🗑 Tarifni o'chirish", "owner_delete_tariff"), ("⬅️ Ortga", "owner_back")]
+    ],
+    "payment_settings": [
+        [("🔄 Payme", "toggle_payme"), ("🔄 Click", "toggle_click")],
+        [("⬅️ Ortga", "owner_back")]
     ]
 }
 
@@ -306,6 +310,17 @@ if DATABASE_URL:
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    
+    # Default settings
+    cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('payme_enabled', '1') ON CONFLICT (key) DO NOTHING")
+    cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('click_enabled', '1') ON CONFLICT (key) DO NOTHING")
+    
     # Ensure columns exist (for existing tables)
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
         try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
@@ -457,6 +472,17 @@ else:
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    
+    # Default settings
+    cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('payme_enabled', '1')")
+    cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('click_enabled', '1')")
+    
     # Ensure columns exist (for existing tables)
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
         try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
@@ -556,6 +582,18 @@ def fetch_all(query, params=None):
     """Barcha natijalarni olish"""
     pass
 
+def get_bot_setting(key, default='1'):
+    """Bot sozlamasini olish"""
+    result = fetch_one("SELECT value FROM bot_settings WHERE key=%s" if DATABASE_URL else "SELECT value FROM bot_settings WHERE key=?", (key,))
+    return result[0] if result else default
+
+def set_bot_setting(key, value):
+    """Bot sozlamasini yangilash"""
+    if DATABASE_URL:
+        execute_query("INSERT INTO bot_settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (key, str(value)))
+    else:
+        execute_query("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
+
 def is_premium_user(user_id):
     """Premium foydalanuvchini tekshirish"""
     result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
@@ -614,6 +652,45 @@ def get_video_stats(code):
     if result:
         return result[0]
     return 0
+
+def activate_premium(user_id, days):
+    """Foydalanuvchiga premium berish yoki muddatini uzaytirish (ADDITIVE)"""
+    # 1. Hozirgi premium holatini tekshirish
+    result = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
+    
+    now = datetime.now()
+    if result:
+        expiry_date = result[0]
+        if isinstance(expiry_date, str):
+            try:
+                expiry_date = datetime.fromisoformat(expiry_date)
+            except:
+                expiry_date = now
+        
+        # Agar hali muddati o'tmagan bo'lsa, mavjud muddatga qo'shamiz
+        if expiry_date > now:
+            new_expiry = expiry_date + timedelta(days=days)
+        else:
+            new_expiry = now + timedelta(days=days)
+    else:
+        new_expiry = now + timedelta(days=days)
+    
+    # 2. Bazani yangilash
+    if DATABASE_URL:
+        execute_query("""
+            INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET 
+            expiry_date = EXCLUDED.expiry_date,
+            approved_date = EXCLUDED.approved_date
+        """, (user_id, new_expiry, 0, now))
+    else:
+        execute_query("""
+            INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
+            VALUES (?, ?, ?, ?)
+        """, (user_id, new_expiry.isoformat(), 0, now.isoformat()))
+    
+    return new_expiry
 
 # ---------- FUNKSIYALAR ----------
 def get_caption_text():
@@ -1007,14 +1084,25 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Tarif topilmadi.")
             return
         price, days = tariff
-        keyboard = [
-            [InlineKeyboardButton("💳 Click Avtomat", callback_data=f"click_auto_{tariff_id}")],
-            [InlineKeyboardButton("💎 Payme Avtomat", callback_data=f"payme_auto_{tariff_id}")],
-            [InlineKeyboardButton("💵 Karta raqam orqali", callback_data=f"click_manual_{tariff_id}")]
-        ]
+        
+        payme_enabled = get_bot_setting('payme_enabled') == '1'
+        click_enabled = get_bot_setting('click_enabled') == '1'
+        
+        keyboard = []
+        if click_enabled:
+            keyboard.append([InlineKeyboardButton("💳 Click Avtomat", callback_data=f"click_auto_{tariff_id}")])
+        if payme_enabled:
+            keyboard.append([InlineKeyboardButton("💎 Payme Avtomat", callback_data=f"payme_auto_{tariff_id}")])
+            
+        keyboard.append([InlineKeyboardButton("💵 Karta raqam orqali", callback_data=f"click_manual_{tariff_id}")])
+        
+        status_msg = ""
+        if not payme_enabled and not click_enabled:
+            status_msg = "\n\n⚠️ Hozirda avtomatik to'lov tizimlari vaqtincha o'chirilgan. Faqat karta orqali to'lov qilishingiz mumkin."
+
         await query.message.reply_text(
             f"⚠️ CLICK tizimi orqali to'lovlar avtomatlashtirilgan bo'lib, to'lov amalga oshishi bilanoq obuna ishga tushadi. Boshqa ilovalar orqali qilingan to'lovlar esa, admin tomonidan tekshirilib so'ngra tasdiqlanadi.\n\n"
-            f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lov usulini tanlang:",
+            f"Siz {price} so'mlik {days} kunlik tarifni tanladingiz.\nTo'lov usulini tanlang:{status_msg}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -1560,6 +1648,54 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text("🗑 O'chiriladigan tarif ID sini yozing:", reply_markup=create_keyboard("tariff_actions"))
         except BadRequest:
             pass
+        return
+
+    # ---------- TO'LOV SOZLAMALARI ----------
+    elif data == "owner_payment_settings":
+        payme_status = "✅ YOQILGAN" if get_bot_setting('payme_enabled') == '1' else "❌ O'CHIRILGAN"
+        click_status = "✅ YOQILGAN" if get_bot_setting('click_enabled') == '1' else "❌ O'CHIRILGAN"
+        
+        text = (
+            "⚙️ To'lov tizimlarini boshqarish:\n\n"
+            f"💎 Payme: {payme_status}\n"
+            f"💳 Click: {click_status}\n\n"
+            "Tugmalarni bosish orqali holatni o'zgartirishingiz mumkin:"
+        )
+        await query.message.edit_text(text, reply_markup=create_keyboard("payment_settings"))
+        return
+
+    elif data == "toggle_payme":
+        current = get_bot_setting('payme_enabled')
+        new_val = '0' if current == '1' else '1'
+        set_bot_setting('payme_enabled', new_val)
+        
+        payme_status = "✅ YOQILGAN" if new_val == '1' else "❌ O'CHIRILGAN"
+        click_status = "✅ YOQILGAN" if get_bot_setting('click_enabled') == '1' else "❌ O'CHIRILGAN"
+        
+        text = (
+            "⚙️ To'lov tizimlarini boshqarish:\n\n"
+            f"💎 Payme: {payme_status}\n"
+            f"💳 Click: {click_status}\n\n"
+            "Holat yangilandi!"
+        )
+        await query.message.edit_text(text, reply_markup=create_keyboard("payment_settings"))
+        return
+
+    elif data == "toggle_click":
+        current = get_bot_setting('click_enabled')
+        new_val = '0' if current == '1' else '1'
+        set_bot_setting('click_enabled', new_val)
+        
+        payme_status = "✅ YOQILGAN" if get_bot_setting('payme_enabled') == '1' else "❌ O'CHIRILGAN"
+        click_status = "✅ YOQILGAN" if new_val == '1' else "❌ O'CHIRILGAN"
+        
+        text = (
+            "⚙️ To'lov tizimlarini boshqarish:\n\n"
+            f"💎 Payme: {payme_status}\n"
+            f"💳 Click: {click_status}\n\n"
+            "Holat yangilandi!"
+        )
+        await query.message.edit_text(text, reply_markup=create_keyboard("payment_settings"))
         return
         
     # ---------- VIDEO EDIT TUGMALARI ----------
@@ -2277,22 +2413,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_user_id = context.user_data.get("target_user")
                 
                 if target_user_id and days > 0:
-                    expiry_date = datetime.now() + timedelta(days=days)
-                    
-                    if DATABASE_URL:
-                        execute_query("""
-                            INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (user_id) DO UPDATE SET 
-                            expiry_date = EXCLUDED.expiry_date,
-                            approved_by = EXCLUDED.approved_by,
-                            approved_date = EXCLUDED.approved_date
-                        """, (target_user_id, expiry_date, OWNER_ID, datetime.now()))
-                    else:
-                        execute_query("""
-                            INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
-                            VALUES (?, ?, ?, ?)
-                        """, (target_user_id, expiry_date.isoformat(), OWNER_ID, datetime.now().isoformat()))
+                    expiry_date = activate_premium(target_user_id, days)
                     
                     await update.message.reply_text(
                         f"✅ User {target_user_id} ga {days} kunlik premium berildi!\n"
@@ -2532,33 +2653,7 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(context.args[0])
         days = int(context.args[1])
         
-        existing_premium = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
-        if existing_premium:
-            current_expiry = existing_premium[0]
-            if isinstance(current_expiry, str):
-                current_expiry = datetime.fromisoformat(current_expiry)
-            
-            if current_expiry > datetime.now():
-                expiry_date = current_expiry + timedelta(days=days)
-            else:
-                expiry_date = datetime.now() + timedelta(days=days)
-        else:
-            expiry_date = datetime.now() + timedelta(days=days)
-            
-        if DATABASE_URL:
-            execute_query("""
-                INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (user_id) DO UPDATE SET 
-                expiry_date = EXCLUDED.expiry_date,
-                approved_by = EXCLUDED.approved_by,
-                approved_date = EXCLUDED.approved_date
-            """, (user_id, expiry_date, OWNER_ID, datetime.now()))
-        else:
-            execute_query("""
-                INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date) 
-                VALUES (?, ?, ?, ?)
-            """, (user_id, expiry_date.isoformat(), OWNER_ID, datetime.now().isoformat()))
+        expiry_date = activate_premium(user_id, days)
         
         await update.message.reply_text(
             f"✅ User {user_id} ga {days} kunlik premium berildi!\n"
@@ -2647,23 +2742,9 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
         tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
         if tariff:
             days = tariff[0]
-            expiry_date = datetime.now() + timedelta(days=days)
-            
-            if DATABASE_URL:
-                execute_query("""
-                    INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET 
-                    expiry_date = EXCLUDED.expiry_date,
-                    approved_date = EXCLUDED.approved_date
-                """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-            else:
-                execute_query("""
-                    INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                    VALUES (?, ?, ?, ?)
-                """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+            expiry_date = activate_premium(user_id, days)
                 
-            await update.message.reply_text(f"🎉 To'lov muvaffaqiyatli amalga oshirildi!\nSizga {days} kunlik reklamasiz (premium) tarif faollashtirildi.")
+            await update.message.reply_text(f"🎉 To'lov muvaffaqiyatli amalga oshirildi!\nSizga {days} kunlik reklamasiz (premium) tarif faollashtirildi.\nMuddat: {expiry_date.strftime('%Y-%m-%d %H:%M')}")
 
 
 # ---------- APPLICATION ----------
@@ -2773,36 +2854,10 @@ def click_complete():
             
             if tariff:
                 days = tariff[0]
-                
-                existing_premium = fetch_one("SELECT expiry_date FROM premium_users WHERE user_id=%s" if DATABASE_URL else "SELECT expiry_date FROM premium_users WHERE user_id=?", (user_id,))
-                if existing_premium:
-                    current_expiry = existing_premium[0]
-                    if isinstance(current_expiry, str):
-                        current_expiry = datetime.fromisoformat(current_expiry)
-                    
-                    if current_expiry > datetime.now():
-                        expiry_date = current_expiry + timedelta(days=days)
-                    else:
-                        expiry_date = datetime.now() + timedelta(days=days)
-                else:
-                    expiry_date = datetime.now() + timedelta(days=days)
-                    
-                if DATABASE_URL:
-                    execute_query("""
-                        INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (user_id) DO UPDATE SET 
-                        expiry_date = EXCLUDED.expiry_date,
-                        approved_date = EXCLUDED.approved_date
-                    """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-                else:
-                    execute_query("""
-                        INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                        VALUES (?, ?, ?, ?)
-                    """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
+                expiry_date = activate_premium(user_id, days)
                     
                 # Foydalanuvchiga muvaffaqiyat haqida xabar yozish
-                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga obuna tarifingiz yoqildi, endi cheklovlarsiz ishlatishingiz mumkin.")
+                requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text=🎉 To'lov muvaffaqiyatli qabul qilindi!\nSizga {days} kunlik obuna yoqildi!\nMuddat: {expiry_date.strftime('%Y-%m-%d %H:%M')}")
                 
                 # Adminga xabar yozish
                 admin_text = (
@@ -3144,24 +3199,8 @@ def payme_handler():
                 tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
                 if tariff:
                     days = int(tariff[0])
-                    expiry_date = datetime.now() + timedelta(days=days)
-                    
-                    # Premium jadvalini yangilash
-                    try:
-                        if DATABASE_URL:
-                            execute_query("""
-                                INSERT INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                                VALUES (%s, %s, %s, %s)
-                                ON CONFLICT (user_id) DO UPDATE SET 
-                                expiry_date = EXCLUDED.expiry_date,
-                                approved_date = EXCLUDED.approved_date
-                            """, (user_id, expiry_date, 0, datetime.now()))
-                        else:
-                            execute_query("""
-                                INSERT OR REPLACE INTO premium_users (user_id, expiry_date, approved_by, approved_date)
-                                VALUES (?, ?, ?, ?)
-                            """, (user_id, expiry_date.isoformat(), 0, datetime.now().isoformat()))
-                        premium_activated = True
+                    expiry_date = activate_premium(user_id, days)
+                    premium_activated = True
                     except Exception as e:
                         print(f"❌ Premium berishda xato: {e}")
 
@@ -3196,8 +3235,7 @@ def payme_handler():
                 status_user = f"✅ Sizga {days} kunlik premium berildi!" if premium_activated else f"💳 Balansingizga {amount} so'm qo'shildi."
                 user_text = (
                     f"🎉 <b>To'lov qabul qilindi!</b>\n\n"
-                    f"{status_user}\n"
-                    f"💰 Joriy balans: {new_balance} so'm"
+                    f"{status_user}"
                 )
                 requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={user_id}&text={urllib.parse.quote(user_text)}&parse_mode=HTML")
                 
