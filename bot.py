@@ -301,9 +301,16 @@ if DATABASE_URL:
             created_at BIGINT,
             performed_at BIGINT DEFAULT 0,
             cancelled_at BIGINT DEFAULT 0,
-            payme_id TEXT
+            payme_id TEXT,
+            provider TEXT DEFAULT 'payme'
         )
     """)
+    
+    # Ensure columns exist (for existing tables)
+    for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
+        try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
+        except: pass
+    conn.commit()
     
 else:
     # Lokal SQLite uchun
@@ -445,11 +452,16 @@ else:
             created_at BIGINT,
             performed_at BIGINT DEFAULT 0,
             cancelled_at BIGINT DEFAULT 0,
-            payme_id TEXT
+            payme_id TEXT,
+            provider TEXT DEFAULT 'payme'
         )
     """)
-
-conn.commit()
+    
+    # Ensure columns exist (for existing tables)
+    for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
+        try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
+        except: pass
+    conn.commit()
 
 # ---------- DATABASE FUNCTIONS ----------
 # Sandbox testlar uchun xotiradagi kesh (Idempotency va Lifecycle uchun)
@@ -516,10 +528,11 @@ def reconnect_and_retry(func):
                             return cursor.fetchall()
                     except Exception as inner_e:
                         print(f"❌ Qayta ulanish vaqtida xato: {inner_e}")
-                else:
+                elif "already exists" not in error_str:
                     print(f"❌ Baza xatoligi: {e}")
             else:
-                print(f"❌ Mahalliy Baza xatoligi: {e}")
+                if "already exists" not in str(e).lower():
+                    print(f"❌ Mahalliy Baza xatoligi: {e}")
                 
             # Dastur umuman qotib yoki o'chib qolishi oldini olamiz
             if func.__name__ == 'fetch_one':
@@ -624,19 +637,6 @@ def get_premium_text():
 
 # ---------- PAYME DATABASE FUNCTIONS ----------
 def db_create_transaction(user_id, amount, tariff_id=None, created_at=None, payme_id=None, forced_id=None, provider='payme'):
-    # Majburiy ustunlarni tekshirish va qo'shish (PostgreSQL va SQLite uchun)
-    columns = [
-        ("provider", "TEXT DEFAULT 'payme'"),
-        ("performed_at", "BIGINT DEFAULT 0"),
-        ("cancelled_at", "BIGINT DEFAULT 0"),
-        ("payme_id", "TEXT"),
-        ("tariff_id", "INTEGER")
-    ]
-    for col_name, col_type in columns:
-        try:
-            execute_query(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_type}")
-        except: pass
-
     # Faqat tanlangan provider'ga tegishli eski buyurtmalarni o'chirib tashlaymiz
     try:
         if DATABASE_URL:
