@@ -2868,43 +2868,54 @@ def payme_handler():
     req_id = req_data.get('id')
     
     if not method:
-        return json_rpc_error(req_id, -32600, "Invalid request")
+        resp = json_rpc_error(req_id, -32600, "Invalid request")
+        print(f"DEBUG: Payme response: {resp.get_data(as_text=True)}")
+        return resp
 
     try:
         if method == "CheckPerformTransaction":
             amount = params.get('amount')
             account = params.get('account', {})
-            # Payme kabinetidagi 'account' maydoni nomi (order_id, som, id bo'lishi mumkin)
             t_id_str = account.get('order_id') or account.get('som') or account.get('id')
             
-            # Sandbox testi uchun: agar 1000 dan katta bo'lsa darhol ruxsat berish
+            print(f"DEBUG: Payme CheckPerform: id={t_id_str}, amount={amount}")
+            
             try:
                 if t_id_str and str(t_id_str).isdigit() and int(str(t_id_str)) >= 1000:
-                    return jsonify({"result": {"allow": True}, "id": req_id})
+                    resp = jsonify({"result": {"allow": True}, "id": req_id})
+                    print(f"DEBUG: Payme response (Sandbox): {resp.get_data(as_text=True)}")
+                    return resp
             except: pass
 
             if not t_id_str:
-                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                resp = json_rpc_error(req_id, -31050, "Order not found", "account")
+                print(f"DEBUG: Payme response: {resp.get_data(as_text=True)}")
+                return resp
 
             transaction = db_get_transaction(t_id_str)
             if not transaction:
-                return json_rpc_error(req_id, -31050, "Order not found", "account")
+                resp = json_rpc_error(req_id, -31050, "Order not found", "account")
+                print(f"DEBUG: Payme response (Not in DB): {resp.get_data(as_text=True)}")
+                return resp
                 
             status = transaction[3]
             db_amount = transaction[2]
             
+            print(f"DEBUG: DB Transaction: status={status}, db_amount={db_amount}")
+            
             if int(amount) != int(db_amount * 100):
-                return json_rpc_error(req_id, -31001, "Incorrect amount")
+                resp = json_rpc_error(req_id, -31001, "Incorrect amount")
+                print(f"DEBUG: Payme response (Amount mismatch): {resp.get_data(as_text=True)}")
+                return resp
                 
             if status != "pending":
-                return json_rpc_error(req_id, -31008, "Order is not pending")
+                resp = json_rpc_error(req_id, -31008, "Order is not pending")
+                print(f"DEBUG: Payme response (Status mismatch): {resp.get_data(as_text=True)}")
+                return resp
 
-            return jsonify({
-                "result": {
-                    "allow": True
-                },
-                "id": req_id
-            })
+            resp = jsonify({"result": {"allow": True}, "id": req_id})
+            print(f"DEBUG: Payme response (Success): {resp.get_data(as_text=True)}")
+            return resp
 
 
         elif method == "CreateTransaction":
