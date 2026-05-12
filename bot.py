@@ -3034,11 +3034,6 @@ def payme_handler():
                 
             db_update_transaction_payme_id(t_id, payme_t_id)
             
-            # transactions jadvaliga provider ustunini qo'shish (agar yo'q bo'lsa)
-            try:
-                execute_query("ALTER TABLE transactions ADD COLUMN provider TEXT DEFAULT 'payme'")
-            except: pass
-            
             # Bazadagi yaratilgan vaqtni olamiz (u yangilangan yoki eskisi)
             stable_create = int(transaction[5]) if len(transaction) > 5 and transaction[5] else int(time.time() * 1000)
             
@@ -3383,26 +3378,6 @@ if __name__ == '__main__':
     print("🕸 Webhook server (Flask) ishga tushdi...")
 
     
-    try:
-        # Barcha kerakli ustunlarni qo'shish
-        cols = [
-            ("provider", "VARCHAR(20) DEFAULT 'click'"),
-            ("payme_id", "VARCHAR(100)"),
-            ("performed_at", "BIGINT"),
-            ("cancelled_at", "BIGINT"),
-            ("tariff_id", "INTEGER")
-        ]
-        for col_name, col_type in cols:
-            try:
-                if DATABASE_URL:
-                    execute_query(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_type}")
-                else:
-                    execute_query(f"ALTER TABLE transactions ADD COLUMN {col_name} {col_type}")
-            except: pass
-        print("✅ Transactions jadvali yangilandi.")
-    except Exception as e:
-        print(f"⚠️ Baza yangilashda xato: {e}")
-        
     try:
         update_total_videos_count()
         print("✅ Videolar soni yangilandi!")
