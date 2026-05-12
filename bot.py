@@ -3196,13 +3196,14 @@ def payme_handler():
                         execute_query("CREATE TABLE IF NOT EXISTS premium_users (user_id BIGINT PRIMARY KEY, expiry_date TEXT, approved_by BIGINT, approved_date TEXT)")
                 except: pass
 
-                tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
-                if tariff:
-                    days = int(tariff[0])
-                    expiry_date = activate_premium(user_id, days)
-                    premium_activated = True
-                    except Exception as e:
-                        print(f"❌ Premium berishda xato: {e}")
+                try:
+                    tariff = fetch_one("SELECT days FROM tariffs WHERE id=%s" if DATABASE_URL else "SELECT days FROM tariffs WHERE id=?", (tariff_id,))
+                    if tariff:
+                        days = int(tariff[0])
+                        expiry_date = activate_premium(user_id, days)
+                        premium_activated = True
+                except Exception as e:
+                    print(f"❌ Premium berishda xato: {e}")
 
             # Balansni ham yangilaymiz (ehtiyot shart)
             db_update_balance(user_id, amount)
