@@ -1996,6 +1996,8 @@ async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFA
 
 # ---------- TEXT HANDLER ----------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
     user_id = update.message.from_user.id
     text = update.message.text.strip()
     action = context.user_data.get("action")
@@ -2586,6 +2588,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- OWNER VIDEO HANDLER ----------
 async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.from_user:
+        return
     if update.message.from_user.id != OWNER_ID:
         return
     if not update.message.video:
@@ -2620,6 +2624,8 @@ async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ---------- OWNER PHOTO HANDLER ----------
 async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.from_user:
+        return
     if update.message.from_user.id != OWNER_ID:
         return
     
@@ -2642,6 +2648,8 @@ async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ---------- PHOTO HANDLER ----------
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.from_user:
+        return
     user_id = update.message.from_user.id
     
     if user_id == OWNER_ID:
@@ -2792,7 +2800,10 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
 
 
 # ---------- APPLICATION ----------
-app = Application.builder().token(BOT_TOKEN).build()
+async def post_init(application: Application):
+    await application.bot.delete_webhook(drop_pending_updates=True)
+
+app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("premium", premium_command))
 app.add_handler(CommandHandler("profil", profil_command))
@@ -2917,6 +2928,14 @@ def click_complete():
                 print(f"✅ COMPLETE Muvaffaqiyatli: {user_id} unga {days} kun berildi")
         except Exception as e:
             print("❌ Click complete update error:", e)
+
+    return jsonify({
+        "click_trans_id": int(click_trans_id),
+        "merchant_trans_id": merchant_trans_id,
+        "merchant_confirm_id": int(click_trans_id),
+        "error": 0,
+        "error_note": "Success"
+    })
     
 def json_rpc_error(req_id, code, message, req_data=None):
     return jsonify({
