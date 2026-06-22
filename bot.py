@@ -3,7 +3,8 @@ from config import CLICK_SERVICE_ID
 from config import CLICK_MERCHANT_ID
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, InlineQueryHandler, ChosenInlineResultHandler, PreCheckoutQueryHandler
-from telegram.error import BadRequest
+from telegram.error import BadRequest, RetryAfter
+import asyncio
 import urllib.parse
 import os
 import psycopg2
@@ -956,6 +957,114 @@ def update_verified_today(user_id):
         execute_query("UPDATE users SET last_check_date=%s WHERE user_id=%s" if DATABASE_URL else "UPDATE users SET last_check_date=? WHERE user_id=?", (today_str, user_id))
     except:
         pass
+
+async def send_broadcast_task(bot, admin_chat_id, users, msg_type, msg_id, from_chat_id, media_id=None, caption=None, premium_result=None):
+    count = 0
+    failed = 0
+    total = len(users)
+    
+    try:
+        status_msg = await bot.send_message(
+            chat_id=admin_chat_id,
+            text=f"📢 Broadcast boshlandi...\n"
+                 f"Jami foydalanuvchilar: {total} ta\n"
+                 f"Yuborildi: 0\n"
+                 f"Xatolik: 0"
+        )
+    except Exception as e:
+        print(f"Status xabar yuborishda xato: {e}")
+        status_msg = None
+
+    last_update_time = time.time()
+
+    for idx, u in enumerate(users):
+        user_id = u[0]
+        try:
+            # 1. Premium reklama (agar bo'lsa)
+            if premium_result:
+                premium_text, photo_id, p_caption = premium_result
+                try:
+                    if photo_id:
+                        await bot.send_photo(chat_id=user_id, photo=photo_id, caption=p_caption)
+                    elif premium_text:
+                        await bot.send_message(chat_id=user_id, text=premium_text)
+                    await asyncio.sleep(0.05)
+                except RetryAfter as r:
+                    await asyncio.sleep(r.retry_after)
+                    if photo_id:
+                        await bot.send_photo(chat_id=user_id, photo=photo_id, caption=p_caption)
+                    elif premium_text:
+                        await bot.send_message(chat_id=user_id, text=premium_text)
+                except Exception:
+                    pass
+
+            # 2. Asosiy xabar
+            if msg_type == "copy":
+                await bot.copy_message(chat_id=user_id, from_chat_id=from_chat_id, message_id=msg_id)
+            elif msg_type == "photo":
+                if msg_id:
+                    await bot.copy_message(chat_id=user_id, from_chat_id=from_chat_id, message_id=msg_id)
+                else:
+                    await bot.send_photo(chat_id=user_id, photo=media_id, caption=caption)
+            elif msg_type == "video":
+                if msg_id:
+                    await bot.copy_message(chat_id=user_id, from_chat_id=from_chat_id, message_id=msg_id)
+                else:
+                    await bot.send_video(chat_id=user_id, video=media_id, caption=caption)
+            
+            count += 1
+            
+        except RetryAfter as r:
+            await asyncio.sleep(r.retry_after)
+            try:
+                if msg_type == "copy":
+                    await bot.copy_message(chat_id=user_id, from_chat_id=from_chat_id, message_id=msg_id)
+                elif msg_type == "photo":
+                    if msg_id:
+                        await bot.copy_message(chat_id=user_id, from_chat_id=from_chat_id, message_id=msg_id)
+                    else:
+                        await bot.send_photo(chat_id=user_id, photo=media_id, caption=caption)
+                elif msg_type == "video":
+                    if msg_id:
+                        await bot.copy_message(chat_id=user_id, from_chat_id=from_chat_id, message_id=msg_id)
+                    else:
+                        await bot.send_video(chat_id=user_id, video=media_id, caption=caption)
+                count += 1
+            except Exception:
+                failed += 1
+        except Exception:
+            failed += 1
+            
+        # Adminni har 15 soniyada xabardor qilib turish
+        current_time = time.time()
+        if status_msg and (current_time - last_update_time >= 15 or idx == total - 1):
+            try:
+                await status_msg.edit_text(
+                    f"📢 Broadcast ketmoqda...\n"
+                    f"Jami: {total} ta\n"
+                    f"Yuborildi: {count} ta\n"
+                    f"Xatolik: {failed} ta\n"
+                    f"Foiz: {int((idx + 1) / total * 100)}%"
+                )
+                last_update_time = current_time
+            except Exception:
+                pass
+                
+        # rate limits cheklovi uchun
+        await asyncio.sleep(0.05)
+
+    # Yakuniy hisobot
+    try:
+        await bot.send_message(
+            chat_id=admin_chat_id,
+            text=f"✅ <b>Broadcast yakunlandi!</b>\n\n"
+                 f"👤 Jami foydalanuvchilar: {total} ta\n"
+                 f"✅ Muvaffaqiyatli: {count} ta\n"
+                 f"❌ Yuborilmadi: {failed} ta",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        print(f"Yakuniy hisobot yuborishda xato: {e}")
 
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2251,20 +2360,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photo_id = context.user_data.get("broadcast_photo")
                 caption = context.user_data.get("broadcast_caption", "")
                 users = fetch_all("SELECT user_id FROM users")
-                count = 0
-                failed = 0
                 
-                for u in users:
-                    try:
-                        if msg_id:
-                            await context.bot.copy_message(chat_id=u[0], from_chat_id=update.message.chat_id, message_id=msg_id)
-                        else:
-                            await context.bot.send_photo(u[0], photo_id, caption=caption)
-                        count += 1
-                    except:
-                        failed += 1
+                await update.message.reply_text("📢 Rasm broadcast orqa fonda yuborilmoqda. Yakunlangach xabar beramiz.")
                 
-                await update.message.reply_text(f"✅ Broadcast {count} foydalanuvchiga yuborildi! ❌ {failed} ta yuborilmadi.")
+                asyncio.create_task(send_broadcast_task(
+                    bot=context.bot,
+                    admin_chat_id=update.message.chat_id,
+                    users=users,
+                    msg_type="photo",
+                    msg_id=msg_id,
+                    from_chat_id=update.message.chat_id,
+                    media_id=photo_id,
+                    caption=caption
+                ))
             else:
                 await update.message.reply_text("❌ Broadcast bekor qilindi.")
             context.user_data.clear()
@@ -2276,20 +2384,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 video_id = context.user_data.get("broadcast_video")
                 caption = context.user_data.get("broadcast_caption", "")
                 users = fetch_all("SELECT user_id FROM users")
-                count = 0
-                failed = 0
                 
-                for u in users:
-                    try:
-                        if msg_id:
-                            await context.bot.copy_message(chat_id=u[0], from_chat_id=update.message.chat_id, message_id=msg_id)
-                        else:
-                            await context.bot.send_video(u[0], video_id, caption=caption)
-                        count += 1
-                    except:
-                        failed += 1
+                await update.message.reply_text("📢 Video broadcast orqa fonda yuborilmoqda. Yakunlangach xabar beramiz.")
                 
-                await update.message.reply_text(f"✅ Broadcast {count} foydalanuvchiga yuborildi! ❌ {failed} ta yuborilmadi.")
+                asyncio.create_task(send_broadcast_task(
+                    bot=context.bot,
+                    admin_chat_id=update.message.chat_id,
+                    users=users,
+                    msg_type="video",
+                    msg_id=msg_id,
+                    from_chat_id=update.message.chat_id,
+                    media_id=video_id,
+                    caption=caption
+                ))
             else:
                 await update.message.reply_text("❌ Broadcast bekor qilindi.")
             context.user_data.clear()
@@ -2299,25 +2406,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == "broadcast_text":
             msg_id = update.message.message_id
             users = fetch_all("SELECT user_id FROM users")
-            count = 0
-            failed = 0
-            
             premium_result = get_premium_text()
             
-            for u in users:
-                try:
-                    if premium_result:
-                        premium_text, photo_id, caption = premium_result
-                        if photo_id:
-                            await context.bot.send_photo(u[0], photo_id, caption=caption)
-                        elif premium_text:
-                            await context.bot.send_message(u[0], premium_text)
-                    await context.bot.copy_message(chat_id=u[0], from_chat_id=update.message.chat_id, message_id=msg_id)
-                    count += 1
-                except:
-                    failed += 1
+            await update.message.reply_text("📢 Matn broadcast orqa fonda yuborilmoqda. Yakunlangach xabar beramiz.")
             
-            await update.message.reply_text(f"✅ Broadcast {count} foydalanuvchiga yuborildi! ❌ {failed} ta yuborilmadi.")
+            asyncio.create_task(send_broadcast_task(
+                bot=context.bot,
+                admin_chat_id=update.message.chat_id,
+                users=users,
+                msg_type="copy",
+                msg_id=msg_id,
+                from_chat_id=update.message.chat_id,
+                premium_result=premium_result
+            ))
             context.user_data.clear()
             return
         
