@@ -3,7 +3,9 @@ from config import CLICK_SERVICE_ID
 from config import CLICK_MERCHANT_ID
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, InlineQueryHandler, ChosenInlineResultHandler, PreCheckoutQueryHandler
-from telegram.error import BadRequest, RetryAfter
+from telegram.error import BadRequest, RetryAfter, NetworkError, TimedOut, Forbidden, Conflict, TelegramError
+from telegram.request import HTTPXRequest
+import logging
 import asyncio
 import urllib.parse
 import os
@@ -2901,10 +2903,62 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
 
 
 # ---------- APPLICATION ----------
-async def post_init(application: Application):
-    await application.bot.delete_webhook(drop_pending_updates=True)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tarmoq va bot xatolarini ushlab qolish (Bad Gateway, ReadError va h.k.)"""
+    err = context.error
+    if isinstance(err, NetworkError):
+        logger.warning(f"⚠️ Telegram tarmoq xatoligi (NetworkError): {err}")
+        return
+    elif isinstance(err, TimedOut):
+        logger.warning(f"⚠️ Telegram so'rov kutish vaqti tugadi (TimedOut): {err}")
+        return
+    elif isinstance(err, Forbidden):
+        logger.warning(f"⚠️ Bot foydalanuvchi tomonidan bloklangan (Forbidden): {err}")
+        return
+    elif isinstance(err, Conflict):
+        logger.error(f"⚠️ Bot tokeni boshqa serverda ishlatilmoqda (Conflict): {err}")
+        return
+    
+    logger.error(f"⚠️ Botda kutilmagan xatolik yuz berdi: {err}", exc_info=context.error)
+
+async def post_init(application: Application):
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.warning(f"delete_webhook bajarishda xatolik: {e}")
+
+# HTTPX tarmog'i sozlamalari (httpx.ReadError va Bad Gateway xatolarini oldini olish uchun)
+request_kwargs = HTTPXRequest(
+    connect_timeout=20.0,
+    read_timeout=30.0,
+    write_timeout=30.0,
+    pool_timeout=20.0,
+    connection_pool_size=20,
+    http_version="1.1",
+)
+
+get_updates_request_kwargs = HTTPXRequest(
+    connect_timeout=20.0,
+    read_timeout=30.0,
+    write_timeout=30.0,
+    pool_timeout=20.0,
+    connection_pool_size=20,
+    http_version="1.1",
+)
+
+app = (
+    Application.builder()
+    .token(BOT_TOKEN)
+    .request(request_kwargs)
+    .get_updates_request(get_updates_request_kwargs)
+    .post_init(post_init)
+    .build()
+)
+
+app.add_error_handler(error_handler)
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("premium", premium_command))
 app.add_handler(CommandHandler("profil", profil_command))
