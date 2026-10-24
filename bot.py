@@ -162,13 +162,14 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
     # PostgreSQL ulash
     result = urlparse(DATABASE_URL)
+    sslmode = 'require' if 'railway' in DATABASE_URL else 'prefer'
     conn = psycopg2.connect(
         database=result.path[1:],
         user=result.username,
         password=result.password,
         host=result.hostname,
         port=result.port,
-        sslmode='require'
+        sslmode=sslmode
     )
     cursor = conn.cursor()
     
@@ -540,12 +541,14 @@ def reconnect_and_retry(func):
                     print("🔄 Baza ulanishi uzilgan ekan! Qayta ulanmoqda...")
                     try:
                         result = urlparse(DATABASE_URL)
+                        sslmode = 'require' if 'railway' in DATABASE_URL else 'prefer'
                         conn = psycopg2.connect(
                             database=result.path[1:], 
                             user=result.username, 
                             password=result.password, 
                             host=result.hostname, 
-                            port=result.port
+                            port=result.port,
+                            sslmode=sslmode
                         )
                         cursor = conn.cursor()
                         
