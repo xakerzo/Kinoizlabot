@@ -2981,7 +2981,97 @@ web_app = Flask(__name__)
 
 @web_app.route("/", methods=["GET"])
 def index():
-    return "OK - Kinoizla API is running", 200
+    try:
+        f_count = fetch_one("SELECT count(*) FROM films" if DATABASE_URL else "SELECT count(*) FROM films")
+        u_count = fetch_one("SELECT count(*) FROM users" if DATABASE_URL else "SELECT count(*) FROM users")
+        parsed = urlparse(DATABASE_URL) if DATABASE_URL else None
+        db_info = f"host={parsed.hostname}, db={parsed.path[1:]}" if parsed else "SQLite"
+        return f"OK - Kinoizla API is running | DB: {db_info} | Films: {f_count[0] if f_count else 0} | Users: {u_count[0] if u_count else 0}", 200
+    except Exception as e:
+        return f"OK - Kinoizla API running, DB status check error: {e}", 200
+
+@web_app.route("/admin/sync_railway", methods=["GET", "POST"])
+def admin_sync_railway():
+    try:
+        from psycopg2.extras import execute_batch
+        railway_url = "postgresql://postgres:QpRMfDcmqkKpcPUqlhXAzHrCzdnQjkHt@centerbeam.proxy.rlwy.net:24937/railway"
+        src = psycopg2.connect(railway_url, sslmode='require')
+        src_cur = src.cursor()
+        
+        target_sslmode = 'require' if 'railway' in DATABASE_URL else 'prefer'
+        result = urlparse(DATABASE_URL)
+        dst = psycopg2.connect(
+            database=result.path[1:],
+            user=result.username,
+            password=result.password,
+            host=result.hostname,
+            port=result.port,
+            sslmode=target_sslmode
+        )
+        dst_cur = dst.cursor()
+        
+        src_cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;")
+        tables = [r[0] for r in src_cur.fetchall()]
+        
+        report = []
+        total_rows = 0
+        for table in tables:
+            src_cur.execute(f"""
+                SELECT column_name, data_type, character_maximum_length, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = '{table}'
+                ORDER BY ordinal_position;
+            """)
+            columns = src_cur.fetchall()
+            col_defs = []
+            for col_name, data_type, max_len, is_null, col_default in columns:
+                type_str = data_type.upper()
+                if max_len:
+                    type_str += f"({max_len})"
+                elif data_type == 'USER-DEFINED':
+                    type_str = 'TEXT'
+                null_str = "NOT NULL" if is_null == 'NO' else ""
+                def_str = f"DEFAULT {col_default}" if col_default and 'nextval' not in col_default else ""
+                if col_default and 'nextval' in col_default:
+                    type_str = 'BIGSERIAL' if 'bigint' in data_type.lower() else 'SERIAL'
+                    def_str = ""
+                parts = [f'"{col_name}"', type_str, null_str, def_str]
+                col_defs.append(" ".join(p for p in parts if p))
+            
+            src_cur.execute(f"""
+                SELECT c.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
+                JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+                    AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+                WHERE constraint_type = 'PRIMARY KEY' AND tc.table_name = '{table}';
+            """)
+            pk_cols = [r[0] for r in src_cur.fetchall()]
+            if pk_cols:
+                pk_formatted = ", ".join(f'"{c}"' for c in pk_cols)
+                col_defs.append(f"PRIMARY KEY ({pk_formatted})")
+                
+            ddl = f'CREATE TABLE IF NOT EXISTS "{table}" (\n    ' + ",\n    ".join(col_defs) + "\n);"
+            dst_cur.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE;')
+            dst_cur.execute(ddl)
+            dst.commit()
+            
+            src_cur.execute(f'SELECT * FROM "{table}";')
+            rows = src_cur.fetchall()
+            if rows:
+                col_names = [desc[0] for desc in src_cur.description]
+                cols_str = ", ".join(f'"{c}"' for c in col_names)
+                placeholders = ", ".join(["%s"] * len(col_names))
+                execute_batch(dst_cur, f'INSERT INTO "{table}" ({cols_str}) VALUES ({placeholders});', rows, page_size=1000)
+                dst.commit()
+            total_rows += len(rows)
+            report.append(f"{table}: {len(rows)}")
+            
+        src.close()
+        dst.close()
+        return f"SUCCESS: Migrated {total_rows} rows! Tables: " + ", ".join(report), 200
+    except Exception as e:
+        return f"ERROR during sync: {e}", 500
 
 def md5_hash(text):
     return hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -3659,6 +3749,21 @@ if __name__ == '__main__':
     flask_thread = threading.Thread(target=run_flask_app, daemon=True)
     flask_thread.start()
     print("🕸 Webhook server (Flask) ishga tushdi...")
+
+    # Bazada filmlar borligini tekshirish (agar bo'sh bo'lsa, Railway dan avtomatik yuklash)
+    if DATABASE_URL:
+        try:
+            films_check = fetch_one("SELECT count(*) FROM films")
+            if not films_check or films_check[0] == 0:
+                print("⚠️ Bazada filmlar topilmadi! Railway dan avtomatik ko'chirilmoqda...")
+                try:
+                    with web_app.test_client() as client:
+                        resp = client.get("/admin/sync_railway")
+                        print(f"✅ Avtomatik ko'chirish natijasi: {resp.data.decode()[:150]}")
+                except Exception as sync_e:
+                    print(f"⚠️ Avtomatik ko'chirishda xatolik: {sync_e}")
+        except Exception as e:
+            print(f"⚠️ Baza tekshirishda xatolik: {e}")
 
     
     try:
