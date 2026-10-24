@@ -158,19 +158,25 @@ def create_video_caption(video_code, video_caption="", is_premium=False):
 
 # ---------- DATABASE ----------
 DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.strip().strip("'\"")
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
+
+def get_db_connection():
+    if not DATABASE_URL:
+        return None
+    try:
+        if "sslmode=" not in DATABASE_URL:
+            sslmode = "require" if "railway" in DATABASE_URL else "prefer"
+            sep = "&" if "?" in DATABASE_URL else "?"
+            return psycopg2.connect(f"{DATABASE_URL}{sep}sslmode={sslmode}")
+        return psycopg2.connect(DATABASE_URL)
+    except Exception:
+        return psycopg2.connect(DATABASE_URL)
 
 if DATABASE_URL:
-    # PostgreSQL ulash
-    result = urlparse(DATABASE_URL)
-    sslmode = 'require' if 'railway' in DATABASE_URL else 'prefer'
-    conn = psycopg2.connect(
-        database=result.path[1:],
-        user=result.username,
-        password=result.password,
-        host=result.hostname,
-        port=result.port,
-        sslmode=sslmode
-    )
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     # AVVAL BOT_SETTINGS JADVALINI YARATAMIZ (XATOLIK OLDINI OLISH UCHUN)
@@ -540,16 +546,7 @@ def reconnect_and_retry(func):
                 if is_disconnected:
                     print("🔄 Baza ulanishi uzilgan ekan! Qayta ulanmoqda...")
                     try:
-                        result = urlparse(DATABASE_URL)
-                        sslmode = 'require' if 'railway' in DATABASE_URL else 'prefer'
-                        conn = psycopg2.connect(
-                            database=result.path[1:], 
-                            user=result.username, 
-                            password=result.password, 
-                            host=result.hostname, 
-                            port=result.port,
-                            sslmode=sslmode
-                        )
+                        conn = get_db_connection()
                         cursor = conn.cursor()
                         
                         # Operatsiyani xatosiz oxiriga yetkazib qo'yamiz
@@ -2998,16 +2995,7 @@ def admin_sync_railway():
         src = psycopg2.connect(railway_url, sslmode='require')
         src_cur = src.cursor()
         
-        target_sslmode = 'require' if 'railway' in DATABASE_URL else 'prefer'
-        result = urlparse(DATABASE_URL)
-        dst = psycopg2.connect(
-            database=result.path[1:],
-            user=result.username,
-            password=result.password,
-            host=result.hostname,
-            port=result.port,
-            sslmode=target_sslmode
-        )
+        dst = get_db_connection()
         dst_cur = dst.cursor()
         
         src_cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;")
