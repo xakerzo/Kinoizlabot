@@ -2976,6 +2976,10 @@ app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_ca
 # ---------- CLICK MERCHANT WEBHOOK (FLASK) ----------
 web_app = Flask(__name__)
 
+@web_app.route("/", methods=["GET"])
+def index():
+    return "OK - Kinoizla API is running", 200
+
 def md5_hash(text):
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
@@ -3641,7 +3645,7 @@ def payme_handler():
         })
 
 def run_flask_app():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 3002))
     web_app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 # ---------- BOT ISHGA TUSHGANDA ----------
