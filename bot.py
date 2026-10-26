@@ -374,6 +374,25 @@ if DATABASE_URL:
     except Exception as e:
         print(f"Error creating promoter tables: {e}")
         conn.rollback()
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_views_log (
+                id SERIAL PRIMARY KEY,
+                code TEXT NOT NULL,
+                viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_views_log_date ON video_views_log(viewed_at)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
     
 else:
     # Lokal SQLite uchun
@@ -562,6 +581,25 @@ else:
         print(f"Error creating promoter tables: {e}")
         conn.rollback()
 
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP")
+        conn.commit()
+    except Exception:
+        pass
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_views_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                viewed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_views_log_date ON video_views_log(viewed_at)")
+        conn.commit()
+    except Exception:
+        pass
+
 # ---------- DATABASE FUNCTIONS ----------
 # Sandbox testlar uchun xotiradagi kesh (Idempotency va Lifecycle uchun)
 PAYME_MOCK_STATES = {} 
@@ -714,6 +752,16 @@ def update_video_stats(code):
     else:
         execute_query("INSERT INTO video_stats (code, views) VALUES (%s, 1)" if DATABASE_URL else "INSERT INTO video_stats (code, views) VALUES (?, 1)", (code,))
     
+    # Har bir ko'rishni sana/vaqt bilan qayd etish (kunlik, haftalik, oylik statistika uchun)
+    try:
+        now = datetime.now()
+        if DATABASE_URL:
+            execute_query("INSERT INTO video_views_log (code, viewed_at) VALUES (%s, %s)", (code, now))
+        else:
+            execute_query("INSERT INTO video_views_log (code, viewed_at) VALUES (?, ?)", (code, now.isoformat()))
+    except Exception:
+        pass
+
     # Umumiy ko'rishlar sonini yangilash
     total_result = fetch_one("SELECT total_views FROM total_stats WHERE id=1")
     if total_result:
@@ -740,6 +788,46 @@ def get_total_stats():
     if result:
         return result[0], result[1]
     return 0, 0
+
+def get_detailed_stats():
+    """Botning to'liq vaqt bo'yicha statistikasini hisoblash (kunlik, haftalik, oylik obunachilar va ko'rishlar)"""
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day)
+    week_start = now - timedelta(days=7)
+    month_start = now - timedelta(days=30)
+    
+    t_today = today_start if DATABASE_URL else today_start.isoformat()
+    t_week = week_start if DATABASE_URL else week_start.isoformat()
+    t_month = month_start if DATABASE_URL else month_start.isoformat()
+    t_now = now if DATABASE_URL else now.isoformat()
+    
+    # 1. Foydalanuvchilar
+    u_total = fetch_one("SELECT COUNT(*) FROM users")[0]
+    u_today = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_today,))[0]
+    u_7d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_week,))[0]
+    u_30d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_month,))[0]
+    
+    # 2. Filmlar va Ko'rishlar
+    total_videos, total_views = get_total_stats()
+    
+    v_today = fetch_one("SELECT COUNT(*) FROM video_views_log WHERE viewed_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM video_views_log WHERE viewed_at >= ?", (t_today,))[0]
+    v_7d = fetch_one("SELECT COUNT(*) FROM video_views_log WHERE viewed_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM video_views_log WHERE viewed_at >= ?", (t_week,))[0]
+    v_30d = fetch_one("SELECT COUNT(*) FROM video_views_log WHERE viewed_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM video_views_log WHERE viewed_at >= ?", (t_month,))[0]
+    
+    # 3. VIP Obunachilar
+    try:
+        vip_active = fetch_one("SELECT COUNT(*) FROM premium_users WHERE expiry_date > %s" if DATABASE_URL else "SELECT COUNT(*) FROM premium_users WHERE expiry_date > ?", (t_now,))[0]
+        vip_today = fetch_one("SELECT COUNT(*) FROM premium_users WHERE approved_date >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM premium_users WHERE approved_date >= ?", (t_today,))[0]
+        vip_7d = fetch_one("SELECT COUNT(*) FROM premium_users WHERE approved_date >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM premium_users WHERE approved_date >= ?", (t_week,))[0]
+        vip_30d = fetch_one("SELECT COUNT(*) FROM premium_users WHERE approved_date >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM premium_users WHERE approved_date >= ?", (t_month,))[0]
+    except Exception:
+        vip_active, vip_today, vip_7d, vip_30d = 0, 0, 0, 0
+
+    return {
+        "users": {"total": u_total, "today": u_today, "7d": u_7d, "30d": u_30d},
+        "views": {"total": total_views, "today": v_today, "7d": v_7d, "30d": v_30d, "videos": total_videos},
+        "vip": {"active": vip_active, "today": vip_today, "7d": vip_7d, "30d": vip_30d}
+    }
 
 def get_video_stats(code):
     """Video statistikasini olish"""
@@ -1179,10 +1267,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Foydalanuvchi mavjudligini tekshirish (referal faqat yangi a'zolar uchun hisoblanadi)
     user_exists = fetch_one("SELECT user_id FROM users WHERE user_id=%s" if DATABASE_URL else "SELECT user_id FROM users WHERE user_id=?", (user_id,))
     if not user_exists:
+        now = datetime.now()
         if DATABASE_URL:
-            execute_query("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
+            execute_query("INSERT INTO users (user_id, created_at) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING", (user_id, now))
         else:
-            execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+            execute_query("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", (user_id, now.isoformat()))
 
     # 2. Referal havola orqali kirgan bo'lsa (/start ref_12345678)
     if args and len(args) > 0 and str(args[0]).startswith("ref_"):
@@ -1920,35 +2009,91 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     elif data == "owner_stats":
-        total_videos, total_views = get_total_stats()
+        stats = get_detailed_stats()
+        u = stats["users"]
+        v = stats["views"]
+        vip = stats["vip"]
         
-        top_videos = fetch_all("SELECT code, views FROM video_stats ORDER BY views DESC LIMIT 30")
+        top_videos = fetch_all("SELECT code, views FROM video_stats ORDER BY views DESC LIMIT 10")
         
-        stats_text = f"📊 Bot statistikalari:\n\n"
-        stats_text += f"📁 Jami videolar: {total_videos} ta\n"
-        stats_text += f"👁️ Jami ko'rishlar: {total_views}\n"
+        stats_text = (
+            f"📊 <b>BOT STATISTIKASI</b>\n\n"
+            f"👥 <b>Foydalanuvchilar:</b>\n"
+            f"├ 👤 Jami: <b>{u['total']:,}</b> ta\n"
+            f"├ 📅 Bugun qo'shilgan: <b>+{u['today']:,}</b> ta\n"
+            f"├ 🗓 So'nggi 7 kunda: <b>+{u['7d']:,}</b> ta\n"
+            f"└ 📆 So'nggi 30 kunda: <b>+{u['30d']:,}</b> ta\n\n"
+            f"🎬 <b>Filmlar va Ko'rishlar:</b>\n"
+            f"├ 📁 Jami filmlar: <b>{v['videos']:,}</b> ta\n"
+            f"├ 👁️ Jami ko'rishlar: <b>{v['total']:,}</b> marta\n"
+            f"├ 📅 Bugungi ko'rishlar: <b>{v['today']:,}</b> marta\n"
+            f"├ 🗓 So'nggi 7 kunda: <b>{v['7d']:,}</b> marta\n"
+            f"└ 📆 So'nggi 30 kunda: <b>{v['30d']:,}</b> marta\n\n"
+            f"⭐ <b>VIP Obunachilar:</b>\n"
+            f"├ 💎 Faol VIP: <b>{vip['active']:,}</b> ta\n"
+            f"├ 📅 Bugun: <b>+{vip['today']:,}</b> ta\n"
+            f"├ 🗓 7 kunda: <b>+{vip['7d']:,}</b> ta\n"
+            f"└ 📆 30 kunda: <b>+{vip['30d']:,}</b> ta\n"
+        )
         
         if top_videos:
-            stats_text += f"\n🔥 Top 30 video:\n"
+            stats_text += f"\n🔥 <b>Eng ko'p ko'rilgan TOP 10 film:</b>\n"
             for i, video in enumerate(top_videos, 1):
                 video_code, views = video
-                # Instagram linklari uchun to'liq ko'rsatish
                 if video_code.startswith('http'):
-                    # Agar juda uzun bo'lsa, qisqartirish
-                    if len(video_code) > 50:
-                        short_code = video_code[:50] + "..."
-                    else:
-                        short_code = video_code
+                    short_code = video_code[:35] + "..." if len(video_code) > 35 else video_code
                 else:
                     short_code = video_code[:20] + "..." if len(video_code) > 20 else video_code
-                stats_text += f"{i}. {short_code} - {views} 👁️\n"
+                stats_text += f"{i}. <code>{short_code}</code> — {views:,} 👁️\n"
         
-        await query.message.edit_text(stats_text)
+        keyboard = [
+            [InlineKeyboardButton("🔥 TOP 30 filmlar", callback_data="owner_top30_videos")],
+            [InlineKeyboardButton("🔄 Yangilash", callback_data="owner_stats"), InlineKeyboardButton("⬅️ Ortga", callback_data="owner_back")]
+        ]
+        await query.message.edit_text(stats_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         return
-    
+
+    elif data == "owner_top30_videos":
+        top_videos = fetch_all("SELECT code, views FROM video_stats ORDER BY views DESC LIMIT 30")
+        stats_text = "🔥 <b>TOP 30 Eng ko'p ko'rilgan filmlar:</b>\n\n"
+        if top_videos:
+            for i, video in enumerate(top_videos, 1):
+                video_code, views = video
+                if video_code.startswith('http'):
+                    short_code = video_code[:35] + "..." if len(video_code) > 35 else video_code
+                else:
+                    short_code = video_code[:20] + "..." if len(video_code) > 20 else video_code
+                stats_text += f"{i}. <code>{short_code}</code> — {views:,} 👁️\n"
+        else:
+            stats_text += "Hozircha ko'rishlar mavjud emas."
+            
+        keyboard = [[InlineKeyboardButton("⬅️ Ortga", callback_data="owner_stats")]]
+        await query.message.edit_text(stats_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
     elif data == "owner_users":
-        user_count = fetch_one("SELECT COUNT(*) FROM users")[0]
-        await query.message.edit_text(f"👥 Botdagi foydalanuvchilar soni: {user_count}")
+        u_count = fetch_one("SELECT COUNT(*) FROM users")[0]
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
+        week_start = now - timedelta(days=7)
+        month_start = now - timedelta(days=30)
+        t_today = today_start if DATABASE_URL else today_start.isoformat()
+        t_week = week_start if DATABASE_URL else week_start.isoformat()
+        t_month = month_start if DATABASE_URL else month_start.isoformat()
+        
+        u_today = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_today,))[0]
+        u_7d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_week,))[0]
+        u_30d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_month,))[0]
+        
+        text = (
+            f"👥 <b>BOT FOYDALANUVCHILARI</b>\n\n"
+            f"👤 Jami a'zolar: <b>{u_count:,}</b> ta\n"
+            f"📅 Bugun qo'shilgan: <b>+{u_today:,}</b> ta\n"
+            f"🗓 So'nggi 7 kunda: <b>+{u_7d:,}</b> ta\n"
+            f"📆 So'nggi 30 kunda: <b>+{u_30d:,}</b> ta\n"
+        )
+        keyboard = [[InlineKeyboardButton("⬅️ Ortga", callback_data="owner_back")]]
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
         return
     
     # ---------- YANGI: CAPTION MATN BOSHQARISH (barcha videolarga qo'shimcha) ----------
