@@ -101,7 +101,8 @@ OWNER_KEYBOARD = {
     ],
     "promoter_actions": [
         [("➕ Promouter qo'shish", "owner_add_promoter"), ("📋 Ro'yxat / Statistika", "owner_list_promoters")],
-        [("🗑 Promouter o'chirish", "owner_delete_promoter"), ("⬅️ Ortga", "owner_back")]
+        [("💳 To'lov qilish / Nollash", "owner_reset_promoter"), ("🗑 Promouter o'chirish", "owner_delete_promoter")],
+        [("⬅️ Ortga", "owner_back")]
     ]
 }
 
@@ -1218,8 +1219,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if promoter_info:
         reward = promoter_info[0]
         joined_res = fetch_one(
-            "SELECT COUNT(*) FROM referrals WHERE promoter_id=%s" if DATABASE_URL 
-            else "SELECT COUNT(*) FROM referrals WHERE promoter_id=?", 
+            "SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status IN ('joined', 'verified')" if DATABASE_URL 
+            else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status IN ('joined', 'verified')", 
             (user_id,)
         )
         verified_res = fetch_one(
@@ -1227,19 +1228,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='verified'", 
             (user_id,)
         )
+        paid_res = fetch_one(
+            "SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status='paid'" if DATABASE_URL 
+            else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='paid'", 
+            (user_id,)
+        )
         joined_count = joined_res[0] if joined_res else 0
         verified_count = verified_res[0] if verified_res else 0
+        paid_count = paid_res[0] if paid_res else 0
         total_earned = verified_count * reward
+        total_paid = paid_count * reward
         
         bot_username = context.bot.username or "kinoni_izlabot"
         ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+        
+        paid_line = f"💳 <b>Ilgari to'langan:</b> {total_paid:,} so'm ({paid_count} ta a'zo)\n" if total_paid > 0 else ""
         
         stats_text = (
             f"📊 <b>Sizning promouterlik hisobingiz:</b>\n\n"
             f"👥 <b>Siz jalb qilgan odamlar:</b> {joined_count} ta\n"
             f"✅ <b>Bajarilgan (kanallarga obuna bo'lganlar):</b> {verified_count} ta\n"
             f"💰 <b>Yig'ilgan summa:</b> {total_earned:,} so'm\n"
-            f"💵 <b>1 ta a'zo uchun to'lov:</b> {reward:,} so'm\n\n"
+            f"💵 <b>1 ta a'zo uchun to'lov:</b> {reward:,} so'm\n"
+            f"{paid_line}\n"
             f"🔗 <b>Sizning taklif havolangiz:</b>\n"
             f"<code>{ref_link}</code>\n"
             f"────────────────────"
@@ -2119,6 +2130,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("🗑 O'chirmoqchi bo'lgan promouterning <b>User ID</b> sini kiriting:", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
         return
 
+    elif data == "owner_reset_promoter":
+        context.user_data.clear()
+        context.user_data["action"] = "reset_promoter_user"
+        await query.message.edit_text("💳 To'lov qilib hisobini 0 ga tushirmoqchi bo'lgan promouterning <b>Telegram ID</b> sini kiriting:", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
+        return
+
     elif data == "owner_list_promoters":
         promoters = fetch_all("SELECT user_id, reward_per_user FROM promoters ORDER BY created_date DESC")
         if not promoters:
@@ -2129,19 +2146,25 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "📋 <b>Promouterlar ro'yxati va statistikasi:</b>\n\n"
         for p in promoters:
             p_id, reward = p[0], p[1]
-            joined_res = fetch_one("SELECT COUNT(*) FROM referrals WHERE promoter_id=%s" if DATABASE_URL else "SELECT COUNT(*) FROM referrals WHERE promoter_id=?", (p_id,))
+            joined_res = fetch_one("SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status IN ('joined', 'verified')" if DATABASE_URL else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status IN ('joined', 'verified')", (p_id,))
             verified_res = fetch_one("SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status='verified'" if DATABASE_URL else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='verified'", (p_id,))
+            paid_res = fetch_one("SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status='paid'" if DATABASE_URL else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='paid'", (p_id,))
             
             joined_count = joined_res[0] if joined_res else 0
             verified_count = verified_res[0] if verified_res else 0
+            paid_count = paid_res[0] if paid_res else 0
             total_sum = verified_count * reward
+            total_paid = paid_count * reward
+            
+            paid_str = f"💳 <b>Ilgari to'langan:</b> {total_paid:,} so'm ({paid_count} ta)\n" if total_paid > 0 else ""
             
             text += (
                 f"👤 <b>ID:</b> <code>{p_id}</code>\n"
                 f"💰 <b>1 a'zo uchun:</b> {reward:,} so'm\n"
-                f"👥 <b>Jalb qilgan:</b> {joined_count} ta\n"
-                f"✅ <b>Bajarilgan:</b> {verified_count} ta\n"
-                f"💵 <b>Yig'ilgan summa:</b> {total_sum:,} so'm\n"
+                f"👥 <b>Hozirgi jalb qilgan:</b> {joined_count} ta\n"
+                f"✅ <b>Bajarilgan (to'lanmagan):</b> {verified_count} ta\n"
+                f"💵 <b>To'lanadigan summa:</b> {total_sum:,} so'm\n"
+                f"{paid_str}"
                 f"🔗 <b>Link:</b> <code>https://t.me/{bot_username}?start=ref_{p_id}</code>\n"
                 f"────────────────────\n"
             )
@@ -2965,6 +2988,65 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ User <code>{target_user_id}</code> promouterlar ro'yxatidan o'chirildi!", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
             except ValueError:
                 await update.message.reply_text("❌ Iltimos, to'g'ri user ID kiriting.")
+            context.user_data.clear()
+            return
+
+        # Promouterning hisobini to'lov qilib nollash
+        elif action == "reset_promoter_user":
+            try:
+                target_user_id = int(text)
+                promoter_info = fetch_one(
+                    "SELECT reward_per_user FROM promoters WHERE user_id=%s" if DATABASE_URL 
+                    else "SELECT reward_per_user FROM promoters WHERE user_id=?", 
+                    (target_user_id,)
+                )
+                if not promoter_info:
+                    await update.message.reply_text("❌ Bunday ID ga ega promouter topilmadi.", reply_markup=create_keyboard("promoter_actions"))
+                    context.user_data.clear()
+                    return
+                
+                reward = promoter_info[0]
+                verified_res = fetch_one(
+                    "SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status='verified'" if DATABASE_URL 
+                    else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='verified'", 
+                    (target_user_id,)
+                )
+                verified_count = verified_res[0] if verified_res else 0
+                total_sum = verified_count * reward
+                
+                if DATABASE_URL:
+                    execute_query("UPDATE referrals SET status='paid' WHERE promoter_id=%s AND status IN ('joined', 'verified')", (target_user_id,))
+                else:
+                    execute_query("UPDATE referrals SET status='paid' WHERE promoter_id=? AND status IN ('joined', 'verified')", (target_user_id,))
+                
+                await update.message.reply_text(
+                    f"✅ <b>Promouter hisobi muvaffaqiyatli 0 ga tushirildi!</b>\n\n"
+                    f"👤 <b>User ID:</b> <code>{target_user_id}</code>\n"
+                    f"✅ <b>To'langan a'zolar:</b> {verified_count} ta\n"
+                    f"💰 <b>To'langan summa:</b> {total_sum:,} so'm\n\n"
+                    f"Endi ushbu promouterning hisobi yangidan 0 dan boshlab hisoblanadi.",
+                    parse_mode="HTML",
+                    reply_markup=create_keyboard("promoter_actions")
+                )
+                
+                # Promouterga bildirishnoma yuborish
+                try:
+                    await context.bot.send_message(
+                        chat_id=target_user_id,
+                        text=(
+                            f"💸 <b>To'lov amalga oshirildi!</b>\n\n"
+                            f"Admin tomonidan sizga to'lov amalga oshirildi:\n"
+                            f"✅ <b>Tasdiqlangan a'zolar:</b> {verified_count} ta\n"
+                            f"💰 <b>To'langan summa:</b> {total_sum:,} so'm\n\n"
+                            f"Shaxsiy hisobingiz 0 ga yangilandi. Yangi takliflar orqali yana daromad olishda davom etishingiz mumkin!"
+                        ),
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    print(f"Promouterga to'lov bildirishnomasi yuborishda xato: {e}")
+                    
+            except ValueError:
+                await update.message.reply_text("❌ Iltimos, to'g'ri raqamli User ID kiriting.", reply_markup=create_keyboard("promoter_actions"))
             context.user_data.clear()
             return
     
