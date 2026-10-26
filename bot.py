@@ -40,7 +40,8 @@ OWNER_KEYBOARD = {
         [("🔤 Startdagi xabar", "owner_start"), ("⭐ Premium matn", "owner_premium_text")],
         [("📝 Caption matn", "owner_caption_text"), ("🎫 Premium boshqaruv", "owner_premium_mgmt")],  # YANGI TUGMA
         [("📊 Statistika", "owner_stats"), ("👥 Bot foydalanuvchilar", "owner_users")],
-        [("💳 Tariflar rejasi", "owner_tariffs"), ("⚙️ To'lov sozlamalari", "owner_payment_settings")]
+        [("💳 Tariflar rejasi", "owner_tariffs"), ("⚙️ To'lov sozlamalari", "owner_payment_settings")],
+        [("🤝 Promouterlar", "owner_promoters")]
     ],
     "video_actions": [
         [("📤 Video yuklash", "owner_upload"), ("🔍 Video qidirish", "owner_search")],
@@ -97,6 +98,10 @@ OWNER_KEYBOARD = {
     "payment_settings": [
         [("🔄 Payme", "toggle_payme"), ("🔄 Click", "toggle_click")],
         [("⬅️ Ortga", "owner_back")]
+    ],
+    "promoter_actions": [
+        [("➕ Promouter qo'shish", "owner_add_promoter"), ("📋 Ro'yxat / Statistika", "owner_list_promoters")],
+        [("🗑 Promouter o'chirish", "owner_delete_promoter"), ("⬅️ Ortga", "owner_back")]
     ]
 }
 
@@ -342,6 +347,23 @@ if DATABASE_URL:
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
         try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
         except: pass
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS promoters (
+            user_id BIGINT PRIMARY KEY,
+            reward_per_user INTEGER DEFAULT 0,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS referrals (
+            user_id BIGINT PRIMARY KEY,
+            promoter_id BIGINT NOT NULL,
+            status TEXT DEFAULT 'joined',
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            verified_date TIMESTAMP
+        )
+    """)
     conn.commit()
     
 else:
@@ -504,6 +526,23 @@ else:
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
         try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
         except: pass
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS promoters (
+            user_id BIGINT PRIMARY KEY,
+            reward_per_user INTEGER DEFAULT 0,
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS referrals (
+            user_id BIGINT PRIMARY KEY,
+            promoter_id BIGINT NOT NULL,
+            status TEXT DEFAULT 'joined',
+            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            verified_date TIMESTAMP
+        )
+    """)
     conn.commit()
 
 # ---------- DATABASE FUNCTIONS ----------
@@ -960,6 +999,48 @@ def update_verified_today(user_id):
     except:
         pass
 
+async def check_and_reward_referral(user_id, context):
+    """Foydalanuvchi majburiy kanallarga a'zo bo'lganda promouter hisobiga pul qo'shish va tasdiqlash"""
+    try:
+        ref = fetch_one(
+            "SELECT promoter_id FROM referrals WHERE user_id=%s AND status='joined'" if DATABASE_URL 
+            else "SELECT promoter_id FROM referrals WHERE user_id=? AND status='joined'", 
+            (user_id,)
+        )
+        if not ref:
+            return
+        
+        promoter_id = ref[0]
+        now = datetime.now()
+        
+        if DATABASE_URL:
+            execute_query("UPDATE referrals SET status='verified', verified_date=%s WHERE user_id=%s", (now, user_id))
+        else:
+            execute_query("UPDATE referrals SET status='verified', verified_date=? WHERE user_id=?", (now.isoformat(), user_id))
+            
+        promoter_info = fetch_one(
+            "SELECT reward_per_user FROM promoters WHERE user_id=%s" if DATABASE_URL 
+            else "SELECT reward_per_user FROM promoters WHERE user_id=?", 
+            (promoter_id,)
+        )
+        reward = promoter_info[0] if promoter_info else 0
+        
+        # Promouterga xabarnoma yuborish
+        try:
+            await context.bot.send_message(
+                chat_id=promoter_id,
+                text=(
+                    f"🎉 <b>Yangi a'zo tasdiqlandi!</b>\n\n"
+                    f"Siz taklif qilgan foydalanuvchi majburiy kanallarga muvaffaqiyatli a'zo bo'ldi.\n"
+                    f"💰 Hisobingizga <b>+{reward:,} so'm</b> qo'shildi!"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"check_and_reward_referral error: {e}")
+
 async def send_broadcast_task(bot, admin_chat_id, users, msg_type, msg_id, from_chat_id, media_id=None, caption=None, premium_result=None):
     count = 0
     failed = 0
@@ -1073,12 +1154,84 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     args = context.args
     
-    if DATABASE_URL:
-        execute_query("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
-    else:
-        execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    # 1. Foydalanuvchi mavjudligini tekshirish (referal faqat yangi a'zolar uchun hisoblanadi)
+    user_exists = fetch_one("SELECT user_id FROM users WHERE user_id=%s" if DATABASE_URL else "SELECT user_id FROM users WHERE user_id=?", (user_id,))
+    if not user_exists:
+        if DATABASE_URL:
+            execute_query("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
+        else:
+            execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
 
-    if args and len(args) > 0:
+    # 2. Referal havola orqali kirgan bo'lsa (/start ref_12345678)
+    if args and len(args) > 0 and str(args[0]).startswith("ref_"):
+        try:
+            promoter_id = int(str(args[0]).replace("ref_", ""))
+            if promoter_id != user_id and not user_exists:
+                promoter_exists = fetch_one(
+                    "SELECT user_id FROM promoters WHERE user_id=%s" if DATABASE_URL 
+                    else "SELECT user_id FROM promoters WHERE user_id=?", 
+                    (promoter_id,)
+                )
+                if promoter_exists:
+                    already_referred = fetch_one(
+                        "SELECT promoter_id FROM referrals WHERE user_id=%s" if DATABASE_URL 
+                        else "SELECT promoter_id FROM referrals WHERE user_id=?", 
+                        (user_id,)
+                    )
+                    if not already_referred:
+                        now = datetime.now()
+                        if DATABASE_URL:
+                            execute_query(
+                                "INSERT INTO referrals (user_id, promoter_id, status, created_date) VALUES (%s, %s, 'joined', %s) ON CONFLICT (user_id) DO NOTHING", 
+                                (user_id, promoter_id, now)
+                            )
+                        else:
+                            execute_query(
+                                "INSERT OR IGNORE INTO referrals (user_id, promoter_id, status, created_date) VALUES (?, ?, 'joined', ?)", 
+                                (user_id, promoter_id, 'joined', now.isoformat())
+                            )
+        except Exception as e:
+            print(f"Referral parsing error: {e}")
+
+    # 3. Agar ushbu foydalanuvchi PROMOUTER bo'lsa, unga o'z statistikasi chiqadi
+    promoter_info = fetch_one(
+        "SELECT reward_per_user FROM promoters WHERE user_id=%s" if DATABASE_URL 
+        else "SELECT reward_per_user FROM promoters WHERE user_id=?", 
+        (user_id,)
+    )
+    if promoter_info:
+        reward = promoter_info[0]
+        joined_res = fetch_one(
+            "SELECT COUNT(*) FROM referrals WHERE promoter_id=%s" if DATABASE_URL 
+            else "SELECT COUNT(*) FROM referrals WHERE promoter_id=?", 
+            (user_id,)
+        )
+        verified_res = fetch_one(
+            "SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status='verified'" if DATABASE_URL 
+            else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='verified'", 
+            (user_id,)
+        )
+        joined_count = joined_res[0] if joined_res else 0
+        verified_count = verified_res[0] if verified_res else 0
+        total_earned = verified_count * reward
+        
+        bot_username = context.bot.username or "kinoni_izlabot"
+        ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+        
+        stats_text = (
+            f"📊 <b>Sizning promouterlik hisobingiz:</b>\n\n"
+            f"👥 <b>Siz jalb qilgan odamlar:</b> {joined_count} ta\n"
+            f"✅ <b>Bajarilgan (kanallarga obuna bo'lganlar):</b> {verified_count} ta\n"
+            f"💰 <b>Yig'ilgan summa:</b> {total_earned:,} so'm\n"
+            f"💵 <b>1 ta a'zo uchun to'lov:</b> {reward:,} so'm\n\n"
+            f"🔗 <b>Sizning taklif havolangiz:</b>\n"
+            f"<code>{ref_link}</code>\n"
+            f"────────────────────"
+        )
+        await update.message.reply_text(stats_text, parse_mode="HTML")
+
+    # 4. Agar start bilan birga video kodi berilgan bo'lsa (ref bo'lmasa)
+    if args and len(args) > 0 and not str(args[0]).startswith("ref_"):
         video_code = urllib.parse.unquote(args[0])
         
         # Premium video tekshirish
@@ -1091,6 +1244,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_premium:
                 context.user_data["last_video_code"] = video_code
                 update_video_stats(video_code)
+                await check_and_reward_referral(user_id, context)
                 
                 # Yangi: create_video_caption funksiyasidan foydalanish
                 final_caption = create_video_caption(video_code, video_caption, is_premium=True)
@@ -1124,6 +1278,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             final_caption = create_video_caption(video_code, video_caption, is_premium=False)
             
             if is_premium:
+                await check_and_reward_referral(user_id, context)
                 await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(video_code))
                 await send_video_caption(update, context)
                 return
@@ -1165,34 +1320,75 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 else:
                     update_verified_today(user_id)
+                    await check_and_reward_referral(user_id, context)
                     await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(video_code))
                     await send_video_caption(update, context)
             
             return
 
-    # 1. Start xabarini olish va chiqarish
+    # 5. Owner uchun start menyusi
+    if user_id == OWNER_ID:
+        await update.message.reply_text("👑 Owner paneli:", reply_markup=create_keyboard("main"))
+        return
+
+    # 6. Majburiy kanallarni tekshirish (oddiy /start yoki ref orqali kirganlar uchun)
+    is_premium = is_premium_user(user_id)
+    if is_premium:
+        update_verified_today(user_id)
+        await check_and_reward_referral(user_id, context)
+    else:
+        channels = fetch_all("SELECT channel FROM channels")
+        not_subscribed = []
+        for c in channels:
+            try:
+                member = await context.bot.get_chat_member(c[0], user_id)
+                if member.status in ["left", "kicked"]:
+                    not_subscribed.append(c[0])
+            except:
+                not_subscribed.append(c[0])
+
+        if channels and (not_subscribed or not is_verified_today(user_id)):
+            keyboard = []
+            channels_to_show = not_subscribed if not_subscribed else [c[0] for c in channels]
+            btn_number = 1
+            for ch in channels_to_show:
+                keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=f"https://t.me/{ch[1:]}")])
+                btn_number += 1
+            
+            try:
+                insta_links = fetch_all("SELECT link FROM insta_links")
+                if insta_links:
+                    for link in insta_links:
+                        keyboard.append([InlineKeyboardButton(f"✅ Kanal {btn_number}", url=link[0])])
+                        btn_number += 1
+            except:
+                pass
+            
+            keyboard.append([InlineKeyboardButton("🔄 Tekshirish", callback_data="check_subs_start")])
+            keyboard.append([InlineKeyboardButton("🎫 Reklama siz ishlatish", callback_data="bypass_ads")])
+            
+            await update.message.reply_text(
+                "Iltimos, botdan foydalanishdan oldin quyidagi kanallarga obuna bo'ling:", 
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+        else:
+            update_verified_today(user_id)
+            await check_and_reward_referral(user_id, context)
+
+    # 7. Start xabarini olish va chiqarish
     start_result = fetch_one("SELECT message_text FROM start_messages ORDER BY id DESC LIMIT 1")
     
     if start_result:
         start_message = start_result[0]
         await update.message.reply_text(start_message)
     
-    # 2. Keyin doimiy "Salom..." xabari chiqadi
-    # Hamkorlar matnini olish
+    # 8. Keyin doimiy "Salom..." xabari chiqadi
     partners_texts = fetch_all("SELECT text FROM partners ORDER BY id")
-    
     greeting_message = "Salom! Kino kodi yoki Instagram linkini kiriting:"
-    
-    # Hamkorlarni qo'shamiz
     if partners_texts:
         greeting_message += "\n\n🤝 Hamkorlarimiz:\n" + "\n".join([text[0] for text in partners_texts])
     
-    # Owner uchun yangi interfeys
-    if user_id == OWNER_ID:
-        await update.message.reply_text("👑 Owner paneli:", reply_markup=create_keyboard("main"))
-        return
-    
-    # Oddiy foydalanuvchilar uchun greeting xabari
     await update.message.reply_text(greeting_message)
 
 # ---------- CALLBACK HANDLER ----------
@@ -1350,6 +1546,41 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ---------- FOYDALANUVCHI OBUNA TEKSHIRISH ----------
+    if data == "check_subs_start":
+        channels = fetch_all("SELECT channel FROM channels")
+        not_subscribed = []
+        for c in channels:
+            try:
+                member = await context.bot.get_chat_member(c[0], user_id)
+                if member.status in ["left", "kicked"]:
+                    not_subscribed.append(c[0])
+            except:
+                not_subscribed.append(c[0])
+
+        if channels and not_subscribed:
+            await query.answer("❌ Hali barcha kanallarga obuna bo'lmadingiz!", show_alert=True)
+            return
+
+        update_verified_today(user_id)
+        await check_and_reward_referral(user_id, context)
+        await query.answer("✅ Obuna tasdiqlandi!")
+
+        try:
+            await query.message.delete()
+        except:
+            pass
+
+        start_result = fetch_one("SELECT message_text FROM start_messages ORDER BY id DESC LIMIT 1")
+        if start_result:
+            await query.message.reply_text(start_result[0])
+
+        partners_texts = fetch_all("SELECT text FROM partners ORDER BY id")
+        greeting_message = "Salom! Kino kodi yoki Instagram linkini kiriting:"
+        if partners_texts:
+            greeting_message += "\n\n🤝 Hamkorlarimiz:\n" + "\n".join([text[0] for text in partners_texts])
+        await query.message.reply_text(greeting_message)
+        return
+
     if data.startswith("check_subs_"):
         short_code = data.replace("check_subs_", "")
         code = get_original_code_from_callback(short_code)
@@ -1361,6 +1592,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if result:
                 file_id, video_caption, extra_text = result
                 update_video_stats(code)
+                await check_and_reward_referral(user_id, context)
                 
                 # YANGI: create_video_caption funksiyasidan foydalanish
                 final_caption = create_video_caption(code, video_caption, is_premium=False)
@@ -1414,6 +1646,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             update_verified_today(user_id)
+            await check_and_reward_referral(user_id, context)
             update_video_stats(code)
             # YANGI: create_video_caption funksiyasidan foydalanish
             final_caption = create_video_caption(code, video_caption, is_premium=False)
@@ -1851,6 +2084,56 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Click holati o'zgartirildi!"
         )
         await query.message.edit_text(text, reply_markup=create_keyboard("payment_settings"))
+        return
+        
+    # ---------- PROMOUTERLAR BOSHQARISH ----------
+    elif data == "owner_promoters":
+        await query.message.edit_text("🤝 <b>Promouterlar (Referal) boshqaruvi:</b>\n\nKerakli bo'limni tanlang:", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
+        return
+
+    elif data == "owner_add_promoter":
+        context.user_data.clear()
+        context.user_data["action"] = "add_promoter_user"
+        await query.message.edit_text("👤 Promouter qilmoqchi bo'lgan foydalanuvchining <b>Telegram ID</b> sini kiriting:", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
+        return
+
+    elif data == "owner_delete_promoter":
+        context.user_data.clear()
+        context.user_data["action"] = "delete_promoter_user"
+        await query.message.edit_text("🗑 O'chirmoqchi bo'lgan promouterning <b>User ID</b> sini kiriting:", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
+        return
+
+    elif data == "owner_list_promoters":
+        promoters = fetch_all("SELECT user_id, reward_per_user FROM promoters ORDER BY created_date DESC")
+        if not promoters:
+            await query.message.edit_text("📭 Hozircha birorta ham promouter qo'shilmagan.", reply_markup=create_keyboard("promoter_actions"))
+            return
+        
+        bot_username = context.bot.username or "kinoni_izlabot"
+        text = "📋 <b>Promouterlar ro'yxati va statistikasi:</b>\n\n"
+        for p in promoters:
+            p_id, reward = p[0], p[1]
+            joined_res = fetch_one("SELECT COUNT(*) FROM referrals WHERE promoter_id=%s" if DATABASE_URL else "SELECT COUNT(*) FROM referrals WHERE promoter_id=?", (p_id,))
+            verified_res = fetch_one("SELECT COUNT(*) FROM referrals WHERE promoter_id=%s AND status='verified'" if DATABASE_URL else "SELECT COUNT(*) FROM referrals WHERE promoter_id=? AND status='verified'", (p_id,))
+            
+            joined_count = joined_res[0] if joined_res else 0
+            verified_count = verified_res[0] if verified_res else 0
+            total_sum = verified_count * reward
+            
+            text += (
+                f"👤 <b>ID:</b> <code>{p_id}</code>\n"
+                f"💰 <b>1 a'zo uchun:</b> {reward:,} so'm\n"
+                f"👥 <b>Jalb qilgan:</b> {joined_count} ta\n"
+                f"✅ <b>Bajarilgan:</b> {verified_count} ta\n"
+                f"💵 <b>Yig'ilgan summa:</b> {total_sum:,} so'm\n"
+                f"🔗 <b>Link:</b> <code>https://t.me/{bot_username}?start=ref_{p_id}</code>\n"
+                f"────────────────────\n"
+            )
+        
+        if len(text) > 4000:
+            text = text[:3900] + "\n... (davomi bor)"
+        
+        await query.message.edit_text(text, parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
         return
         
     # ---------- VIDEO EDIT TUGMALARI ----------
@@ -2585,6 +2868,89 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Iltimos, to'g'ri user ID kiriting.")
             context.user_data.clear()
             return
+
+        # Promouter qo'shish (User ID kiritish)
+        elif action == "add_promoter_user":
+            try:
+                target_user_id = int(text)
+                context.user_data["action"] = "set_promoter_reward"
+                context.user_data["target_promoter_id"] = target_user_id
+                await update.message.reply_text(
+                    f"User <code>{target_user_id}</code> ga har bir tasdiqlangan (kanallarga obuna bo'lgan) a'zo uchun beriladigan summani so'mda kiriting (masalan: 500 yoki 1000):",
+                    parse_mode="HTML"
+                )
+            except ValueError:
+                await update.message.reply_text("❌ Iltimos, faqat to'g'ri raqamli Telegram User ID kiriting.")
+            return
+
+        # Promouter narxini belgilash
+        elif action == "set_promoter_reward":
+            try:
+                reward = int(text)
+                target_user_id = context.user_data.get("target_promoter_id")
+                if target_user_id and reward >= 0:
+                    now = datetime.now()
+                    if DATABASE_URL:
+                        execute_query("""
+                            INSERT INTO promoters (user_id, reward_per_user, created_date)
+                            VALUES (%s, %s, %s)
+                            ON CONFLICT (user_id) DO UPDATE SET reward_per_user = EXCLUDED.reward_per_user
+                        """, (target_user_id, reward, now))
+                    else:
+                        execute_query("""
+                            INSERT INTO promoters (user_id, reward_per_user, created_date)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(user_id) DO UPDATE SET reward_per_user=excluded.reward_per_user
+                        """, (target_user_id, reward, now.isoformat()))
+                    
+                    bot_username = context.bot.username or "kinoni_izlabot"
+                    ref_link = f"https://t.me/{bot_username}?start=ref_{target_user_id}"
+                    
+                    await update.message.reply_text(
+                        f"✅ <b>Promouter muvaffaqiyatli saqlandi!</b>\n\n"
+                        f"👤 <b>User ID:</b> <code>{target_user_id}</code>\n"
+                        f"💰 <b>1 ta a'zo uchun to'lov:</b> {reward:,} so'm\n"
+                        f"🔗 <b>Taklif havolasi:</b>\n<code>{ref_link}</code>\n\n"
+                        f"Ushbu havolani foydalanuvchiga yuborishingiz mumkin.",
+                        parse_mode="HTML",
+                        reply_markup=create_keyboard("promoter_actions")
+                    )
+                    
+                    # Foydalanuvchiga xabar yuborish
+                    try:
+                        await context.bot.send_message(
+                            chat_id=target_user_id,
+                            text=(
+                                f"🎉 <b>Siz botda rasmiy hamkor (promouter) etib belgilandingiz!</b>\n\n"
+                                f"💰 Har bir kanallarga to'liq a'zo bo'lgan yangi a'zo uchun: <b>{reward:,} so'm</b>\n"
+                                f"🔗 Sizning shaxsiy taklif havolangiz:\n<code>{ref_link}</code>\n\n"
+                                f"Ushbu havola orqali odam taklif qilib pul ishlashingiz mumkin. "
+                                f"Botga /start bosib shaxsiy statistikangizni kuzatib borishingiz mumkin!"
+                            ),
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        print(f"Promouterga xabar yuborishda xato: {e}")
+                else:
+                    await update.message.reply_text("❌ Xatolik! Summa musbat raqam bo'lishi kerak.")
+            except ValueError:
+                await update.message.reply_text("❌ Iltimos, summani faqat raqamda kiriting.")
+            context.user_data.clear()
+            return
+
+        # Promouterni o'chirish
+        elif action == "delete_promoter_user":
+            try:
+                target_user_id = int(text)
+                if DATABASE_URL:
+                    execute_query("DELETE FROM promoters WHERE user_id=%s", (target_user_id,))
+                else:
+                    execute_query("DELETE FROM promoters WHERE user_id=?", (target_user_id,))
+                await update.message.reply_text(f"✅ User <code>{target_user_id}</code> promouterlar ro'yxatidan o'chirildi!", parse_mode="HTML", reply_markup=create_keyboard("promoter_actions"))
+            except ValueError:
+                await update.message.reply_text("❌ Iltimos, to'g'ri user ID kiriting.")
+            context.user_data.clear()
+            return
     
     # ---------- FOYDALANUVCHI KINO KO'RISH ----------
     original_user_text = text
@@ -2643,6 +3009,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_caption = create_video_caption(text, video_caption, is_premium=False)
         
         if is_premium:
+            await check_and_reward_referral(user_id, context)
             await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(text))
             await send_video_caption(update, context)
             return
@@ -2684,6 +3051,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 update_verified_today(user_id)
+                await check_and_reward_referral(user_id, context)
                 await update.message.reply_video(file_id, caption=final_caption, reply_markup=get_share_keyboard(text))
                 await send_video_caption(update, context)
     else:
