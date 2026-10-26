@@ -345,26 +345,34 @@ if DATABASE_URL:
     
     # Ensure columns exist (for existing tables)
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
-        try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
-        except: pass
+        try:
+            cursor.execute(f"ALTER TABLE transactions ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS promoters (
-            user_id BIGINT PRIMARY KEY,
-            reward_per_user INTEGER DEFAULT 0,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS referrals (
-            user_id BIGINT PRIMARY KEY,
-            promoter_id BIGINT NOT NULL,
-            status TEXT DEFAULT 'joined',
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            verified_date TIMESTAMP
-        )
-    """)
-    conn.commit()
+    conn.rollback()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS promoters (
+                user_id BIGINT PRIMARY KEY,
+                reward_per_user INTEGER DEFAULT 0,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS referrals (
+                user_id BIGINT PRIMARY KEY,
+                promoter_id BIGINT NOT NULL,
+                status TEXT DEFAULT 'joined',
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                verified_date TIMESTAMP
+            )
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"Error creating promoter tables: {e}")
+        conn.rollback()
     
 else:
     # Lokal SQLite uchun
@@ -524,26 +532,34 @@ else:
     
     # Ensure columns exist (for existing tables)
     for col, col_type in [("provider", "TEXT DEFAULT 'payme'"), ("performed_at", "BIGINT DEFAULT 0"), ("cancelled_at", "BIGINT DEFAULT 0"), ("payme_id", "TEXT"), ("tariff_id", "INTEGER")]:
-        try: cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
-        except: pass
+        try:
+            cursor.execute(f"ALTER TABLE transactions ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS promoters (
-            user_id BIGINT PRIMARY KEY,
-            reward_per_user INTEGER DEFAULT 0,
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS referrals (
-            user_id BIGINT PRIMARY KEY,
-            promoter_id BIGINT NOT NULL,
-            status TEXT DEFAULT 'joined',
-            created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            verified_date TIMESTAMP
-        )
-    """)
-    conn.commit()
+    conn.rollback()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS promoters (
+                user_id BIGINT PRIMARY KEY,
+                reward_per_user INTEGER DEFAULT 0,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS referrals (
+                user_id BIGINT PRIMARY KEY,
+                promoter_id BIGINT NOT NULL,
+                status TEXT DEFAULT 'joined',
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                verified_date TIMESTAMP
+            )
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"Error creating promoter tables: {e}")
+        conn.rollback()
 
 # ---------- DATABASE FUNCTIONS ----------
 # Sandbox testlar uchun xotiradagi kesh (Idempotency va Lifecycle uchun)
