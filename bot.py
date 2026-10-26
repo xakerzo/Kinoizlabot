@@ -1168,6 +1168,11 @@ async def send_broadcast_task(bot, admin_chat_id, users, msg_type, msg_id, from_
 
 # ---------- START COMMAND ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.effective_chat:
+        return
+    # Guruhlarda /start bosilganda bot javob bermasligi uchun (faqat shaxsiy chatda)
+    if update.effective_chat.type != "private":
+        return
     user_id = update.message.from_user.id
     args = context.args
     
@@ -2429,7 +2434,10 @@ async def handle_chosen_inline_result(update: Update, context: ContextTypes.DEFA
 
 # ---------- TEXT HANDLER ----------
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
+    if not update.message or not update.effective_chat:
+        return
+    # Guruhlardagi xabarlarga bot umuman javob bermasligi uchun (faqat shaxsiy chatda)
+    if update.effective_chat.type != "private":
         return
     user_id = update.message.from_user.id
     text = update.message.text.strip()
@@ -3157,7 +3165,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- OWNER VIDEO HANDLER ----------
 async def handle_owner_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.from_user:
+    if not update.message or not update.message.from_user or not update.effective_chat:
+        return
+    if update.effective_chat.type != "private":
         return
     if update.message.from_user.id != OWNER_ID:
         return
@@ -3217,7 +3227,9 @@ async def handle_owner_photo(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ---------- PHOTO HANDLER ----------
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.from_user:
+    if not update.message or not update.message.from_user or not update.effective_chat:
+        return
+    if update.effective_chat.type != "private":
         return
     user_id = update.message.from_user.id
     
@@ -3295,6 +3307,8 @@ async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def profil_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User profile ko'rish command"""
+    if not update.message or not update.effective_chat or update.effective_chat.type != "private":
+        return
     user_id = update.message.from_user.id
     username = update.message.from_user.username
     user_display = f"@{username}" if username else str(user_id)
