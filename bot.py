@@ -382,6 +382,19 @@ if DATABASE_URL:
         conn.rollback()
 
     try:
+        cursor.execute("SELECT value FROM bot_settings WHERE key = 'users_created_at_reset'")
+        res = cursor.fetchone()
+        if not res:
+            # Avvaldan mavjud bo'lgan eski foydalanuvchilar sanasini NULL qilish
+            # Shunda ular 'Bugun qo'shilgan' deb hisoblanmaydi, faqat 'Jami'da ko'rinadi
+            cursor.execute("UPDATE users SET created_at = NULL")
+            cursor.execute("INSERT INTO bot_settings (key, value) VALUES ('users_created_at_reset', '1') ON CONFLICT (key) DO NOTHING")
+            conn.commit()
+    except Exception as e:
+        print(f"Error resetting existing users created_at: {e}")
+        conn.rollback()
+
+    try:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS video_views_log (
                 id SERIAL PRIMARY KEY,
@@ -584,6 +597,16 @@ else:
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP")
         conn.commit()
+    except Exception:
+        pass
+
+    try:
+        cursor.execute("SELECT value FROM bot_settings WHERE key = 'users_created_at_reset'")
+        res = cursor.fetchone()
+        if not res:
+            cursor.execute("UPDATE users SET created_at = NULL")
+            cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('users_created_at_reset', '1')")
+            conn.commit()
     except Exception:
         pass
 
@@ -803,9 +826,9 @@ def get_detailed_stats():
     
     # 1. Foydalanuvchilar
     u_total = fetch_one("SELECT COUNT(*) FROM users")[0]
-    u_today = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_today,))[0]
-    u_7d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_week,))[0]
-    u_30d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_month,))[0]
+    u_today = fetch_one("SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= ?", (t_today,))[0]
+    u_7d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= ?", (t_week,))[0]
+    u_30d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= ?", (t_month,))[0]
     
     # 2. Filmlar va Ko'rishlar
     total_videos, total_views = get_total_stats()
@@ -2081,9 +2104,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t_week = week_start if DATABASE_URL else week_start.isoformat()
         t_month = month_start if DATABASE_URL else month_start.isoformat()
         
-        u_today = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_today,))[0]
-        u_7d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_week,))[0]
-        u_30d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at >= ?", (t_month,))[0]
+        u_today = fetch_one("SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= ?", (t_today,))[0]
+        u_7d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= ?", (t_week,))[0]
+        u_30d = fetch_one("SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= %s" if DATABASE_URL else "SELECT COUNT(*) FROM users WHERE created_at IS NOT NULL AND created_at >= ?", (t_month,))[0]
         
         text = (
             f"👥 <b>BOT FOYDALANUVCHILARI</b>\n\n"
